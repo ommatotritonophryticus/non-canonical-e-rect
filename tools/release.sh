@@ -5,6 +5,11 @@
 #   tools/release.sh                 all of them
 #   tools/release.sh psp macos       just those
 #
+# Every target leaves a finished folder in dist/ as well as a zip of it. The
+# folder is the thing to copy; the zip is the thing to upload. The PSP one is a
+# Memory Stick overlay - its contents go to the root of the stick as they are,
+# sound and all.
+#
 # Targets: macos windows linux-x86_64 linux-aarch64 psp
 #
 # macOS and PSP are built natively on the host. The other three go through a
@@ -33,6 +38,12 @@ DOCKER_TARGET=target-docker
 ALL_TARGETS=(macos windows linux-x86_64 linux-aarch64 psp)
 
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+
+# What each target left behind, for the summary at the end. Recorded rather than
+# printed as it happens: a build prints screens of compiler output, and where
+# the finished thing landed is the one line that must not be scrolled away.
+BUILT=()
+note_built() { BUILT+=("$1"); }
 die() { printf '\nerror: %s\n' "$*" >&2; exit 1; }
 
 # --- shared packaging -------------------------------------------------------
@@ -152,6 +163,7 @@ build_macos() {
     stage_desktop "$stage" "$ROOT/target/release/erect" \
         "$ROOT/tools/dist-readme/macos.txt" erect
     zip_stage "$stage" "$DIST/erect-macos.zip"
+    note_built "erect-macos"
 }
 
 # Builds for <rust-target> on the host, and answers where the binary landed.
@@ -181,6 +193,7 @@ build_linux() {
     stage_desktop "$stage" "$built/erect" \
         "$ROOT/tools/dist-readme/linux-$arch.txt" erect
     zip_stage "$stage" "$DIST/erect-linux-$arch.zip"
+    note_built "erect-linux-$arch"
 }
 
 build_windows() {
@@ -202,6 +215,7 @@ build_windows() {
     stage_desktop "$stage" "$built/erect.exe" \
         "$ROOT/tools/dist-readme/windows.txt" erect.exe
     zip_stage "$stage" "$DIST/erect-windows.zip"
+    note_built "erect-windows"
 }
 
 build_psp() {
@@ -209,19 +223,27 @@ build_psp() {
     command -v cargo-psp >/dev/null 2>&1 || die "cargo-psp is missing: cargo install cargo-psp"
     ( cd "$ROOT/erect-psp" && cargo psp --release )
 
+    # Laid out as a Memory Stick overlay: everything under the staging folder
+    # goes to the stick's root as it stands, so installing is one drag rather
+    # than "copy this one folder and leave those three files behind". The
+    # licences and the readme travel *inside* the game folder for the same
+    # reason - dropped at the root of a stick they would sit among the owner's
+    # own files and look like litter.
     local stage="$DIST/erect-psp"
     local game="$stage/PSP/GAME/ERECT"
     rm -rf "$stage"
     mkdir -p "$game/pack"
     cp "$ROOT/erect-psp/target/mipsel-sony-psp/release/erect-psp.EBOOT.PBP" \
         "$game/EBOOT.PBP"
-    cp "$ROOT/tools/dist-readme/psp.txt" "$stage/README.txt"
-    stage_licences "$stage"
+    cp "$ROOT/tools/dist-readme/psp.txt" "$game/README.txt"
+    stage_licences "$game"
     local p
     for p in $(pack_dirs); do
         cp -R "$ROOT/packs/$p/psp" "$game/pack/$p"
     done
     zip_stage "$stage" "$DIST/erect-psp.zip"
+    note_built "erect-psp"
+
 }
 
 # --- entry point --------------------------------------------------------------
@@ -242,4 +264,14 @@ for t in "${targets[@]}"; do
 done
 
 say "done"
-ls -1 "$DIST"/*.zip 2>/dev/null || true
+printf '\nEverything is in %s\n' "$DIST"
+for name in "${BUILT[@]}"; do
+    printf '\n  %s/\n' "$DIST/$name"
+    printf '    %-24s the finished build\n' "$(du -sh "$DIST/$name" | cut -f1)"
+    printf '    %-24s the same thing, zipped\n' "$(basename "$DIST/$name.zip")"
+    if [ "$name" = erect-psp ]; then
+        printf '    copy everything inside that folder to the root of the Memory Stick;\n'
+        printf '    the game, its sound and its readme are already in the right places.\n'
+    fi
+done
+printf '\n'

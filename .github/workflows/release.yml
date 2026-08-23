@@ -161,6 +161,13 @@ jobs:
         # dependency nobody in this repository reviews.
         env:
           GH_TOKEN: ${{ github.token }}
+          # Named outright, because this job never checks the repository out -
+          # it only needs the artefacts the other jobs uploaded. Left to work it
+          # out for itself, `gh` looks for a git remote in the working directory
+          # and fails with "not a git repository", which is true and unhelpful.
+          # Cloning fifty megabytes to tell it something it can be told is not a
+          # trade worth making.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           files=$(find artifacts -type f | sort)

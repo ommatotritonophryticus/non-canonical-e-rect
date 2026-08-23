@@ -23,6 +23,25 @@ machine's localhost.
 Each target lands in `dist/` as both a directory and a zip of it, laid out the
 way it is meant to be installed.
 
+The folder is the thing to copy, the zip is the thing to upload; both are left
+behind, and the script prints where. That last part is not decoration - a build
+prints screens of compiler output, and where the finished thing landed is the
+one line that must not scroll away, so it is repeated in a summary at the end.
+
+The PSP one is a Memory Stick overlay. Everything inside `dist/erect-psp/` goes
+to the root of the stick as it stands - the EBOOT, all three sound packs and the
+readme are already in the folders the PSP expects:
+
+```
+dist/erect-psp/PSP/GAME/ERECT/EBOOT.PBP
+dist/erect-psp/PSP/GAME/ERECT/README.txt
+dist/erect-psp/PSP/GAME/ERECT/pack/pack1 … pack3
+```
+
+The readme and the licences sit *inside* the game folder rather than beside it,
+so an install is one drag and leaves nothing loose at the root of somebody's
+stick.
+
 ## What builds where, and why
 
 | Target | Built by | Where |
@@ -261,8 +280,15 @@ Runs on the host and covers `erect-core` and `erect-audio` — 299 tests. The
 frontends are mostly not covered; drawing is the part a test cannot see.
 
 `erect-psp` is excluded from the workspace, because it only builds for
-`mipsel-sony-psp` and its presence would break a plain `cargo build`. Build it
-from inside its own directory.
+`mipsel-sony-psp` and its presence would break a plain `cargo build`.
+
+**Build it from inside its own directory.** Run from the repository root,
+`cargo psp` tries to build every crate in the workspace for the PSP - including
+the desktop frontend, which is macroquad, cpal and gilrs, none of which know
+what a PSP is. Left to itself that surfaces as `gilrs` panicking in its own
+build script over a missing `CARGO_CFG_TARGET_FAMILY`, which is true and says
+nothing about the actual mistake, so `erect-desktop/build.rs` catches the case
+and says what to do instead.
 
 ### Checking what actually reaches the screen
 

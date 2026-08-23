@@ -3,19 +3,22 @@ E-Rect for PSP
 
 Install
 -------
-Copy the PSP folder from this archive to the root of your Memory Stick, so you
-end up with:
+Copy everything in this archive to the root of your Memory Stick. Nothing has to
+be arranged by hand - the folders are already in the shape the PSP expects, and
+this file travels with the game rather than landing among your own:
 
     ms0:/PSP/GAME/ERECT/EBOOT.PBP
+    ms0:/PSP/GAME/ERECT/README.txt
     ms0:/PSP/GAME/ERECT/pack/pack1/*.wav
     ms0:/PSP/GAME/ERECT/pack/pack2/*.wav
+    ms0:/PSP/GAME/ERECT/pack/pack3/*.wav
 
 Then start it from the PSP's Game menu (Memory Stick).
 
-Two soundtracks ship and one is drawn at random every time you reach the menu
-and every time you start a run, so a session moves between them. Both have to be
-present: they are held in memory together, which is what makes the change
-instant instead of a pause while six megabytes are re-read.
+Three soundtracks ship and one is drawn at random every time you reach the menu
+and every time you start a run, so a session moves between them. All of them
+have to be present: they are held in memory together, which is what makes the
+change instant instead of a pause while six megabytes are re-read.
 
 If the game cannot find them the title screen says so along the bottom, so if it
 is quiet, look there first. In an emulator the path is relative to whatever you
@@ -30,6 +33,8 @@ Controls
     D-pad / analog nub   move
     Cross                jump
     Square               attack
+    Triangle             dash - a short burst that shoves what it passes
+                         through and cannot be touched while it lasts
     Circle / Down        ground slam - puts up the wall
     Start                pause menu
     Home                 quit
