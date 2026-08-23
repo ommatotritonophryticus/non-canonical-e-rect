@@ -86,15 +86,35 @@ jobs:
       - uses: actions/checkout@v4
       # The nightly and rust-src come from erect-psp/rust-toolchain.toml, so
       # this only has to install the tool that reads them.
-      - name: Cache cargo-psp
-        id: cargo-psp
+      #
+      # Installed into a directory of its own and cached whole. The crate ships
+      # five binaries - cargo-psp itself plus prxgen, mksfo, pack-pbp and
+      # prxmin - and cargo-psp shells out to the others while packing an EBOOT.
+      # Caching just the one named `cargo-psp` restored a tool with none of its
+      # tools: the first run installed everything and worked, and every run
+      # after it hit the cache, skipped the install and died on a missing
+      # prxgen. A whole install tree cached as a unit cannot drift that way,
+      # whatever the crate adds later.
+      - name: Cache the PSP toolchain
+        id: psp-tools
         uses: actions/cache@v4
         with:
-          path: ~/.cargo/bin/cargo-psp
+          path: ~/.psp-tools
           key: cargo-psp-0.2.9-${{ runner.os }}
       - name: Install cargo-psp
-        if: steps.cargo-psp.outputs.cache-hit != 'true'
-        run: cargo install cargo-psp --version 0.2.9 --locked
+        if: steps.psp-tools.outputs.cache-hit != 'true'
+        run: cargo install cargo-psp --version 0.2.9 --locked --root ~/.psp-tools
+      - name: Put the PSP toolchain on PATH
+        run: echo "$HOME/.psp-tools/bin" >> "$GITHUB_PATH"
+      - name: Check the toolchain is complete
+        # Cheap, and it names the missing piece instead of leaving it to a
+        # panic three minutes into a build.
+        run: |
+          set -euo pipefail
+          for tool in cargo-psp prxgen mksfo pack-pbp; do
+            command -v "$tool" >/dev/null || { echo "missing: $tool"; exit 1; }
+          done
+          echo "all present"
       - name: Build and package
         run: tools/release.sh psp
       - uses: actions/upload-artifact@v4

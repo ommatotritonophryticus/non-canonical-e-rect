@@ -228,6 +228,13 @@ who installed it.
 cargo install cargo-psp
 ```
 
+That one command is the whole of it, and it is worth knowing why: the crate
+ships five binaries, not one. `cargo-psp` drives the build and then shells out
+to `prxgen`, `mksfo` and `pack-pbp` to pack the EBOOT, so all of them have to be
+on `PATH` together. Anything that installs or caches only the one named
+`cargo-psp` produces a tool with none of its tools, and the failure comes three
+minutes into a build as `failed to run prxgen`.
+
 Verified with cargo-psp 0.2.9 against the `psp` crate 0.3.13. The nightly it
 needs (`nightly-2026-08-02`, with `rust-src`) comes from
 `erect-psp/rust-toolchain.toml`, so there is nothing to select by hand — and no
