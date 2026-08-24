@@ -1793,7 +1793,7 @@ impl Game {
                             knockback: kind.knockback_scale(level),
                             lift: kind.lift_scale(),
                             shoves: AttackKind::mastered(level),
-                            ticks_left: TRAP_LIFE_TICKS,
+                            life: TrapLife::new(AttackKind::trap_life(level)),
                         });
                     }
                     _ => {}
@@ -2116,7 +2116,7 @@ impl Game {
             }
         }
         for (ti, t) in self.traps.iter().enumerate() {
-            if t.ticks_left > 0 && body.intersects(&t.body) {
+            if t.life.alive() && body.intersects(&t.body) {
                 return Some((t.owner, HitSource::Trap(ti)));
             }
         }
@@ -3187,9 +3187,10 @@ impl Game {
         self.bullets.retain(|b| !b.dead);
 
         for t in self.traps.iter_mut() {
-            t.ticks_left -= 1;
+            t.life.age();
         }
-        self.traps.retain(|t| t.ticks_left > 0);
+        self.traps.retain(|t| t.life.alive());
+
     }
 
     fn update_explosions(&mut self) {

@@ -430,9 +430,14 @@ impl Renderer {
                 let b = on_screen(&b.body, cam);
                 self.draw_actor(v, &b, mine);
             }
+            // A box dims as its life runs out, the same way a damaged actor
+            // does - so how long it has left is read off it at a glance
+            // instead of counted. A mastered one never dims, which says just
+            // as plainly that it is not going anywhere.
             for t in game.traps.iter().filter(|t| t.owner == player.index) {
-                let t = on_screen(&t.body, cam);
-                self.draw_actor(v, &t, mine);
+                let face = mq(player.color.shaded(t.life.fade()));
+                let body = on_screen(&t.body, cam);
+                self.draw_actor(v, &body, face);
             }
 
             // Melee box: white with a black outline, like the original. A

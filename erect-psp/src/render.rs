@@ -294,9 +294,11 @@ unsafe fn render_session(game: &Game) {
                 let b = on_screen(&b.body, cam);
                 actor(&b, mine, ow, oh);
             }
+            // Dimming as its life runs out; see the desktop renderer.
             for t in game.traps.iter().filter(|t| t.owner == p.index) {
-                let t = on_screen(&t.body, cam);
-                actor(&t, mine, ow, oh);
+                let face = gfx::pack(p.color.shaded(t.life.fade()));
+                let body = on_screen(&t.body, cam);
+                actor(&body, face, ow, oh);
             }
 
             // A two-sided swing puts out a second box behind the player.

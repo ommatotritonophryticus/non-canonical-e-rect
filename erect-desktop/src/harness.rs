@@ -55,6 +55,11 @@ pub struct Harness {
     fight: bool,
     /// Raises a wall every so often, so one can be looked at.
     wall: bool,
+    /// Presses attack once, on the first frame, and then nothing.
+    ///
+    /// `fight` swings every twelve ticks, which for a placed box means it is
+    /// always a fresh one. Watching a box age needs exactly one press.
+    once: bool,
 }
 
 impl Harness {
@@ -77,6 +82,7 @@ impl Harness {
         let mut fight = false;
         let mut boons = false;
         let mut screen: Option<String> = None;
+        let mut once = false;
         let mut written: Option<(erect_core::campaign::ModeKind, erect_core::attack::AttackKind)> =
             None;
         let mut wall = erect_core::boon::WallMod::Plain;
@@ -108,7 +114,19 @@ impl Harness {
                         written = Some((kind, weapon));
                     }
                 }
+                "once" => once = value != "0",
                 "level" => dev.attack_level = value.parse().unwrap_or(1),
+                // `arm=trap` - what a dev run starts holding, by the label the
+                // offer screen shows.
+                "arm" => {
+                    if let Some(kind) = erect_core::attack::AttackKind::EVERY
+                        .iter()
+                        .copied()
+                        .find(|k| k.label().eq_ignore_ascii_case(value))
+                    {
+                        dev.attack = kind;
+                    }
+                }
                 "frames" => frames = value.parse().unwrap_or(600),
                 "out" => shots.push((frames, value.to_string())),
                 // A second and later snapshot, so one run can show a thing
@@ -215,6 +233,7 @@ impl Harness {
             keep_alive,
             fight,
             wall: wall != erect_core::boon::WallMod::Plain,
+            once,
         })
     }
 
@@ -227,6 +246,10 @@ impl Harness {
                 frame.players[0].jump = me.grounded && tick % 90 == 0;
                 frame.players[0].slam = !me.grounded && tick % 90 == 6;
             }
+        }
+        if self.once {
+            frame.players[0].attack = tick == 1;
+            return;
         }
         if !self.fight {
             return;

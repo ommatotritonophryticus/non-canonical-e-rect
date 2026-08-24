@@ -492,7 +492,66 @@ pub struct Trap {
     /// Whether it turns what it catches around rather than only nudging it.
     /// Carried from placement, for the same reason its damage is.
     pub shoves: bool,
-    pub ticks_left: i32,
+    /// How long it has left, and how long it was given.
+    pub life: TrapLife,
+}
+
+/// What a placed box has left to stand for.
+///
+/// An enum rather than a pair of numbers because "endless" and "how far
+/// through its life it is" are the two things a renderer asks, and only one of
+/// them has an answer at a time. Keeping a `total` beside a nullable `left`
+/// would let a box exist that is endless *and* half spent, which is not a
+/// state the game has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrapLife {
+    /// Counting down from `total`, at which point it goes on its own.
+    Ticking { left: i32, total: i32 },
+    /// A mastered box. Nothing but another box takes it off the field.
+    Endless,
+}
+
+impl TrapLife {
+    /// From what [`crate::attack::AttackKind::trap_life`] gave for the level
+    /// that placed it.
+    pub fn new(life: Option<i32>) -> Self {
+        match life {
+            Some(total) => TrapLife::Ticking { left: total, total },
+            None => TrapLife::Endless,
+        }
+    }
+
+    /// True while the box is still standing. One with nothing left is gone at
+    /// the end of the tick, but the hit test runs before that.
+    pub fn alive(self) -> bool {
+        match self {
+            TrapLife::Ticking { left, .. } => left > 0,
+            TrapLife::Endless => true,
+        }
+    }
+
+    /// One tick closer to going. An endless box does not age.
+    pub fn age(&mut self) {
+        if let TrapLife::Ticking { left, .. } = self {
+            *left -= 1;
+        }
+    }
+
+    /// How brightly to draw the box: 1.0 when freshly placed, easing down to
+    /// [`crate::config::TRAP_FADE_FLOOR`] on its last tick.
+    ///
+    /// A box is the only thing on the field carrying a life the player cannot
+    /// otherwise see, and it is the one they are meant to plan around - so it
+    /// wears its timer, in the same way every other actor wears its health. An
+    /// endless one stays bright, which is the same signal read the other way.
+    pub fn fade(self) -> f32 {
+        let TrapLife::Ticking { left, total } = self else {
+            return 1.0;
+        };
+        let ratio = (left.max(0) as f32 / total.max(1) as f32).clamp(0.0, 1.0);
+        let floor = crate::config::TRAP_FADE_FLOOR;
+        floor + (1.0 - floor) * ratio
+    }
 }
 
 /* ------------------------------------------------------------------ *

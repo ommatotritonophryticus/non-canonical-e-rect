@@ -4097,33 +4097,49 @@ fn a_held_button_does_not_keep_swinging() {
 #[test]
 fn traps_are_placed_as_fast_as_the_button_is_pressed() {
     // No wait between placements: how many may stand at once is the only limit.
-    // Two, not three: the last level stopped buying another trap and started
-    // buying what a trap does.
-    let mut game = armed_with(AttackKind::Frozen, 3);
-    for _ in 0..3 {
+    let cap = AttackKind::Frozen.max_instances(MAX_LEVEL);
+    let mut game = armed_with(AttackKind::Frozen, MAX_LEVEL);
+    for _ in 0..cap + 3 {
         clear_arena(&mut game);
         game.tick(&attack_input());
     }
-    assert_eq!(game.traps.len(), 2, "presses place up to the cap and no further");
+    assert_eq!(game.traps.len(), cap, "presses place up to the cap and no further");
 }
 
 #[test]
-fn a_new_trap_replaces_the_only_one_at_the_first_level() {
-    let mut game = armed_with(AttackKind::Frozen, 1);
-    game.tick(&attack_input());
-    let first = game.traps[0].body.x;
-
-    // Walk a little so the second lands somewhere else.
-    let v = game.viewport;
-    game.players[0].body.x += v.wper(20.0);
-    clear_arena(&mut game);
-    game.tick(&attack_input());
-
-    assert_eq!(game.traps.len(), 1, "level one holds exactly one");
-    assert!(
-        (game.traps[0].body.x - first).abs() > v.wper(10.0),
-        "the standing one should be the new one"
+fn each_level_lays_more_floor_than_the_last() {
+    // What the first two levels buy is ground - more boxes, standing longer -
+    // rather than a bigger number.
+    assert_eq!(
+        (1..=MAX_LEVEL)
+            .map(|l| AttackKind::Frozen.max_instances(l))
+            .collect::<alloc::vec::Vec<_>>(),
+        alloc::vec![4, 6, 10]
     );
+    let lives: alloc::vec::Vec<Option<i32>> =
+        (1..=MAX_LEVEL).map(AttackKind::trap_life).collect();
+    assert_eq!(
+        lives,
+        alloc::vec![Some(90), Some(120), None],
+        "a second and a half, then two, then for good"
+    );
+    assert_eq!(lives[0], Some(TICKS_PER_SEC as i32 * 3 / 2));
+    assert_eq!(lives[1], Some(TICKS_PER_SEC as i32 * 2));
+}
+
+#[test]
+fn the_first_level_still_holds_four_at_once() {
+    let cap = AttackKind::Frozen.max_instances(1);
+    assert_eq!(cap, 4);
+    let mut game = armed_with(AttackKind::Frozen, 1);
+    let v = game.viewport;
+    for _ in 0..cap {
+        clear_arena(&mut game);
+        game.tick(&attack_input());
+        // Walk a little so each lands somewhere else.
+        game.players[0].body.x += v.wper(8.0);
+    }
+    assert_eq!(game.traps.len(), cap, "level one holds exactly four");
 }
 
 #[test]
@@ -4131,19 +4147,20 @@ fn a_full_set_of_traps_loses_its_oldest_to_the_next_one() {
     let mut game = armed_with(AttackKind::Frozen, 3);
     let v = game.viewport;
 
+    let cap = AttackKind::Frozen.max_instances(3);
     let mut placed = Vec::new();
-    for _ in 0..2 {
+    for _ in 0..cap {
         clear_arena(&mut game);
         game.tick(&attack_input());
         placed.push(game.traps.last().unwrap().body.x);
-        game.players[0].body.x += v.wper(15.0);
+        game.players[0].body.x += v.wper(6.0);
     }
-    assert_eq!(game.traps.len(), 2);
+    assert_eq!(game.traps.len(), cap);
 
     // The next press still places, and the oldest is what makes room.
     clear_arena(&mut game);
     game.tick(&attack_input());
-    assert_eq!(game.traps.len(), 2, "the cap still holds");
+    assert_eq!(game.traps.len(), cap, "the cap still holds");
     assert!(
         !game.traps.iter().any(|t| (t.body.x - placed[0]).abs() < 0.01),
         "the oldest should have made way"
@@ -4181,28 +4198,103 @@ fn a_trap_stands_where_the_swing_would_have_reached() {
     assert_eq!(game.traps.len(), 1);
     let t = game.traps[0];
     assert!(t.body.x >= player_right - 0.01, "placed in front, not on the player");
-    assert!(t.ticks_left > 0);
 }
 
 #[test]
-fn a_trap_expires_so_it_cannot_be_parked_as_a_shield() {
-    let mut game = armed_with(AttackKind::Frozen, 1);
-    game.tick(&attack_input());
-    assert_eq!(game.traps.len(), 1);
+fn a_placed_box_is_three_quarters_of_the_swing_it_replaces() {
+    // Its width is measured off the swing that would have been, so it tracks
+    // the wave ramp exactly as a real swing does rather than being a number of
+    // its own.
+    assert_eq!(AttackKind::Frozen.length_scale(1, 1.0, false), 0.75);
 
-    for _ in 0..TRAP_LIFE_TICKS + 2 {
+    let mut game = armed_with(AttackKind::Frozen, 1);
+    let v = game.viewport;
+    let reach = game.waves.rule.gun_reach();
+    let full = game.players[0].projected_swing(&v, reach, game.wave, 1.0).w;
+    game.tick(&attack_input());
+
+    let placed = game.traps[0].body.w;
+    assert!(
+        (placed - full * 0.75).abs() < 0.01,
+        "placed {placed} against a full swing of {full}"
+    );
+    // Wide enough not to be stepped around, which is what it was at a half.
+    assert!(placed > full * 0.5, "a trap that narrow is simply walked past");
+}
+
+#[test]
+fn a_mastered_trap_stands_until_it_is_replaced() {
+    // Deliberately idle throughout - nothing here would replace it, so if it
+    // goes it went on its own, and at the last level it must not.
+    let mut game = armed_with(AttackKind::Frozen, MAX_LEVEL);
+    game.tick(&attack_input());
+    assert_eq!(game.traps[0].life, TrapLife::Endless);
+
+    for _ in 0..TICKS_PER_SEC as i32 * 20 {
         clear_arena(&mut game);
-        // Deliberately idle: a trap must go on its own, not only when replaced.
         game.tick(&idle());
     }
-    assert!(game.traps.is_empty(), "the trap outlived its welcome");
+    assert_eq!(game.traps.len(), 1, "a mastered box let itself go");
+}
+
+#[test]
+fn an_unmastered_trap_expires_on_its_own() {
+    // The other two levels keep a life, so a box cannot be parked in front of
+    // the player as a permanent shield until the last one buys that away.
+    for level in 1..MAX_LEVEL {
+        let life = AttackKind::trap_life(level).expect("only mastery is endless");
+        let mut game = armed_with(AttackKind::Frozen, level);
+        game.tick(&attack_input());
+        assert_eq!(
+            game.traps[0].life,
+            TrapLife::Ticking { left: life - 1, total: life },
+            "level {level}: the placing tick also ages it once"
+        );
+
+        for _ in 0..life {
+            clear_arena(&mut game);
+            game.tick(&idle());
+        }
+        assert!(game.traps.is_empty(), "level {level} outlived its welcome");
+    }
+}
+
+#[test]
+fn a_mastered_trap_outlives_the_wave_it_was_placed_in() {
+    // Nothing between waves clears the field of them either. A box placed at
+    // the end of one wave is still standing at the start of the next.
+    let mut game = armed_with(AttackKind::Frozen, MAX_LEVEL);
+    game.tick(&attack_input());
+    let placed = game.traps[0].body.x;
+    let wave = game.wave;
+
+    into_the_lull(&mut game);
+    game.waves.skip_countdown();
+    for _ in 0..120 {
+        clear_arena(&mut game);
+        game.tick(&idle());
+    }
+    assert!(game.wave > wave, "the wave should have moved on");
+    assert_eq!(game.traps.len(), 1, "the box went with the wave");
+    assert_eq!(game.traps[0].body.x, placed, "and it should not have moved");
+}
+
+#[test]
+fn a_new_run_starts_with_the_field_clear_of_them() {
+    // The one thing that takes an endless box off the field without another
+    // replacing it. Without this a run would open on the last one's leavings.
+    let mut game = armed_with(AttackKind::Frozen, MAX_LEVEL);
+    game.tick(&attack_input());
+    assert_eq!(game.traps.len(), 1);
+    game.start_run(1);
+    assert!(game.traps.is_empty(), "a fresh run inherited a box");
 }
 
 #[test]
 fn a_trap_throws_what_it_catches() {
-    // It holds ground the same way a swing does, and its life is shorter than
-    // the arc it throws into - so nothing it catches comes back down inside it
-    // and gets juggled.
+    // It holds ground the same way a swing does: what walks in is thrown up
+    // and sideways rather than ground down where it stands. Where it goes
+    // afterwards is [`a_trap_lets_go_of_what_it_throws`].
     let mut game = armed_with(AttackKind::Frozen, 1);
     game.tick(&attack_input());
     let trap = game.traps[0].body;
@@ -4217,16 +4309,45 @@ fn a_trap_throws_what_it_catches() {
     game.tick(&idle());
 
     assert!(game.zombies[0].ay < 0.0, "a trap should throw like a swing");
-    assert!(
-        (TRAP_LIFE_TICKS as f32) < 40.0,
-        "a trap that outlasts the throw arc would juggle what it catches"
+    assert!(game.zombies[0].ax != 0.0, "and throw it clear, not straight up");
+}
+
+#[test]
+fn a_trap_lets_go_of_what_it_throws() {
+    // The throw carries a catch up and clear within a few ticks, and it does
+    // not come back down inside. That is what keeps a trap from being a kill
+    // zone: its life is how long the ground stays held, not how long one enemy
+    // stays in it.
+    let mut game = armed_with(AttackKind::Frozen, 1);
+    game.tick(&attack_input());
+    let trap = game.traps[0].body;
+
+    let v = game.viewport;
+    let mut z = Zombie::from_edge(&v, &mut game.rng, TEST_ENEMY_COLOR);
+    z.body = trap;
+    z.hp = 1_000_000.0;
+    z.hpmax = 1_000_000.0;
+    game.zombies.push(z);
+    game.flyers.clear();
+
+    let mut ticks_hit = 0;
+    for _ in 0..TICKS_PER_SEC as i32 * 2 {
+        let hp = game.zombies[0].hp;
+        game.tick(&idle());
+        if game.zombies[0].hp < hp {
+            ticks_hit += 1;
+        }
+    }
+    assert_eq!(
+        ticks_hit, 3,
+        "one catch is three ticks, and the box stands for good afterwards"
     );
 }
 
 #[test]
 fn a_trap_grinds_rather_than_deleting_what_walks_in() {
-    // It never throws, so anything standing in it takes every tick. That is
-    // why its per-tick damage is a quarter of a swing's: at full value a single
+    // Anything standing in it takes every tick it stands there, which is why
+    // the per-tick number is a fraction of a swing's: at full value a single
     // trap would be a kill zone rather than ground held.
     let mut game = armed_with(AttackKind::Frozen, 1);
     game.tick(&attack_input());
@@ -4244,6 +4365,48 @@ fn a_trap_grinds_rather_than_deleting_what_walks_in() {
     game.tick(&idle());
     let one_tick = before - game.zombies[0].hp;
     assert_eq!(one_tick, 16.0, "a quarter of a swing's tick");
+}
+
+#[test]
+fn only_mastery_touches_a_traps_damage() {
+    // The first two levels leave the number alone and buy floor instead. The
+    // last one takes it all the way to what an ordinary swing deals.
+    let damage: alloc::vec::Vec<f32> = (1..=MAX_LEVEL)
+        .map(|level| AttackKind::Frozen.damage(level))
+        .collect();
+    assert_eq!(damage, alloc::vec![16.0, 16.0, 64.0]);
+    assert_eq!(
+        AttackKind::Frozen.damage(MAX_LEVEL),
+        crate::attack::BASE_DAMAGE,
+        "mastered, it stops trading damage away"
+    );
+    assert_eq!(
+        AttackKind::Frozen.damage(1),
+        AttackKind::Frozen.damage(2),
+        "the second level is floor, not force"
+    );
+}
+
+#[test]
+fn the_cap_holds_however_fast_the_button_is_pressed() {
+    // A player walking and pressing would tile the arena were it not for this,
+    // and at the last level - where nothing expires - it is the only bound on
+    // how much ground one player can hold.
+    for level in 1..=MAX_LEVEL {
+        let cap = AttackKind::Frozen.max_instances(level);
+        let mut game = armed_with(AttackKind::Frozen, level);
+        let v = game.viewport;
+        for _ in 0..cap + 5 {
+            clear_arena(&mut game);
+            game.tick(&attack_input());
+            game.players[0].body.x += v.wper(4.0);
+        }
+        assert_eq!(
+            game.traps.len(),
+            cap,
+            "level {level}: pressing past the cap should leave only the cap"
+        );
+    }
 }
 
 #[test]
@@ -4688,14 +4851,15 @@ fn the_dev_menu_hands_out_an_attack_and_its_level() {
     // And the level is what the cap actually reads. Counted as a high-water
     // mark rather than a snapshot: traps expire, so what is standing at any
     // one moment depends on when you look.
+    let cap = AttackKind::Frozen.max_instances(3);
     let mut most = 0;
     for _ in 0..40 {
         clear_arena(&mut game);
         game.tick(&attack_input());
         most = most.max(game.traps.len());
-        assert!(game.traps.len() <= 2, "the cap was exceeded");
+        assert!(game.traps.len() <= cap, "the cap was exceeded");
     }
-    assert_eq!(most, 2, "two traps is the cap at every level past the first");
+    assert_eq!(most, cap, "the level the menu handed out is the cap that holds");
 }
 
 #[test]
@@ -6974,15 +7138,16 @@ fn an_ordinary_trap_only_nudges() {
 }
 
 #[test]
-fn the_last_level_stops_handing_out_another_instance() {
-    // Two, not three. The step from the second level to the third is a change
-    // in behaviour; another instance on top would make it twice the size of the
-    // step before it.
-    for kind in [AttackKind::Bullet, AttackKind::Frozen] {
-        assert_eq!(kind.max_instances(1), 1);
-        assert_eq!(kind.max_instances(2), 2);
-        assert_eq!(kind.max_instances(MAX_LEVEL), 2, "{kind:?} still grew");
-    }
+fn a_shot_stops_at_two_in_the_air() {
+    // Two, not three. For a bullet the step from the second level to the third
+    // is a change in behaviour, and another instance on top would make it twice
+    // the size of the step before it.
+    //
+    // A trap does not work that way: what its levels buy *is* instances, so it
+    // keeps growing. See `each_level_lays_more_floor_than_the_last`.
+    assert_eq!(AttackKind::Bullet.max_instances(1), 1);
+    assert_eq!(AttackKind::Bullet.max_instances(2), 2);
+    assert_eq!(AttackKind::Bullet.max_instances(MAX_LEVEL), 2, "a shot still grew");
 }
 
 #[test]
@@ -7099,8 +7264,18 @@ fn no_last_level_is_a_downgrade() {
         // And no step that dwarfs the weapon it belongs to. A last level worth
         // several of its own weapon is not a specialisation, it is a different
         // weapon that happens to share a name.
+        //
+        // The trap is the one exception, and it is a deliberate one. Its first
+        // two levels leave damage alone and buy floor instead, so the whole of
+        // its number lands on the last step: 16 per tick to 64, exactly four
+        // times, by construction rather than by drift. Measured on one enemy in
+        // one box this probe sees only that - it cannot see the four boxes
+        // becoming ten, or the life becoming endless, so the real distance
+        // between the ends of this ladder is wider still. Those two axes are
+        // checked in `each_level_lays_more_floor_than_the_last`.
+        let limit = if kind == AttackKind::Frozen { 4.0 } else { 4.0 - f32::EPSILON };
         assert!(
-            three < one * 4.0,
+            three <= one * limit,
             "{}: the last level is {three} against {one} at the first",
             kind.label()
         );

@@ -217,15 +217,16 @@ pub const BULLET_SPEED_MULT: f32 = 4.0;
 /// to trade.
 pub const BULLET_HIT_TICKS: i32 = 3;
 
-/// Ticks a placed box stands for.
+/// How dim a box is drawn on its last tick, as a fraction of the player's
+/// colour.
 ///
-/// Long enough to hold ground with, short enough that it cannot be parked in
-/// front of the player as a permanent shield.
+/// Not nothing. A box on its last tick still deals its full damage, so one
+/// that had faded out entirely would be reading the player its own timer as an
+/// invitation to walk through.
 ///
-/// Also shorter than the arc an enemy is thrown into: a throw takes about forty
-/// ticks to come back down, so nothing it catches lands in it twice. That is
-/// what lets it throw like a swing without turning into a juggle.
-pub const TRAP_LIFE_TICKS: i32 = 33;
+/// A mastered box has no life to spend and is never dimmed at all - which is
+/// itself the signal that this one is not going anywhere.
+pub const TRAP_FADE_FLOOR: f32 = 0.35;
 
 /* ---------------- dash ---------------- */
 

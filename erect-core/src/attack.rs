@@ -175,13 +175,41 @@ impl AttackKind {
     pub fn max_instances(self, level: u8) -> usize {
         match self {
             // Capped one short of the level ladder on purpose. The third level
-            // is where each of these stops being "one more of the same" and
-            // starts behaving differently - a shot that carries on down the
-            // line, a trap that turns back what walks in. Handing out a third
-            // instance as well would make that step twice the size of the one
-            // before it.
-            AttackKind::Bullet | AttackKind::Frozen => level.clamp(1, 2) as usize,
+            // is where a shot stops being "one more of the same" and starts
+            // behaving differently - it carries on down the line - and handing
+            // out a third instance as well would make that step twice the size
+            // of the one before it.
+            AttackKind::Bullet => level.clamp(1, 2) as usize,
+            // A trap is not aimed, so what its levels buy is floor: four boxes,
+            // then six, then ten. The numbers are large because each one only
+            // covers the width of a swing, and because a box is spent the
+            // moment it is walked around rather than through.
+            //
+            // At the last level this is also the *only* thing that takes a box
+            // off the field, since a mastered one never expires. That makes the
+            // ten load-bearing rather than tuning.
+            AttackKind::Frozen => match level.clamp(1, MAX_LEVEL) {
+                1 => 4,
+                2 => 6,
+                _ => 10,
+            },
             _ => 0,
+        }
+    }
+
+    /// How long a placed box stands, or `None` for a mastered one, which
+    /// stands until its owner places enough others to push it out.
+    ///
+    /// A second and a half, then two, then for good. The ladder is the same
+    /// idea as [`Self::max_instances`] read the other way: the first two levels
+    /// widen how much floor can be held at once and how long each piece of it
+    /// lasts, and the last removes the limit rather than raising it again.
+    pub fn trap_life(level: u8) -> Option<i32> {
+        let second = crate::config::TICKS_PER_SEC as i32;
+        match level.clamp(1, MAX_LEVEL) {
+            1 => Some(second * 3 / 2),
+            2 => Some(second * 2),
+            _ => None,
         }
     }
 
@@ -219,9 +247,14 @@ impl AttackKind {
             // are swung at once, so every step is worth double.
             AttackKind::Thin => 0.6 + 0.2 * level,
             AttackKind::Tall => 0.7,
-            // Neither of these uses the attached box for reach.
+            // A thrown square carries its own size; the box on the player is
+            // never held out at all.
             AttackKind::Bullet => 0.0,
-            AttackKind::Frozen => 0.5,
+            // Not reach either - this is how wide the *placed* box comes out,
+            // measured off the swing that would have been. Three quarters of
+            // one, up from a half: a trap is walked into rather than aimed, so
+            // a narrow one is simply stepped around.
+            AttackKind::Frozen => 0.75,
         }
     }
 
@@ -254,7 +287,8 @@ impl AttackKind {
 
     /// Damage one connecting tick deals, before armour.
     pub fn damage(self, level: u8) -> f32 {
-        let level = level.clamp(1, MAX_LEVEL) as f32;
+        let step = level.clamp(1, MAX_LEVEL);
+        let level = step as f32;
         match self {
             // One blow per enemy, so this is the whole swing rather than a
             // tick of it. At level 1 it matches an ordinary swing's damage per
@@ -266,7 +300,16 @@ impl AttackKind {
             // depending on where the throw sends the enemy; this is the top of
             // that range with the luck taken out.
             AttackKind::SingleHit => BASE_DAMAGE * (3.0 + level),
-            // Stands on its own without being aimed, so per-tick is small.
+            // Per tick, and small, because it stands on its own without being
+            // aimed: anything that walks in takes it for as long as it is in
+            // there. The first two levels buy ground - more boxes, standing
+            // longer - and leave the number where it is.
+            //
+            // Mastery is the one step that touches it, and it goes all the way
+            // to what an ordinary swing deals. That is the shape of the whole
+            // kind: two levels of laying more floor, then one that makes the
+            // floor lethal.
+            AttackKind::Frozen if Self::mastered(step) => BASE_DAMAGE,
             AttackKind::Frozen => BASE_DAMAGE / 4.0,
             // Per connecting tick, like a swing - and like a swing, the throw
             // carries the target clear after the first, so a shot is worth
