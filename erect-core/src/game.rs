@@ -820,7 +820,12 @@ impl Game {
             return;
         }
         let written = self.mode.written();
-        let by_wave = matches!(written, Some((ModeKind::Tutorial, _)));
+        // Free offers, paced by the waves rather than by the score. A tutorial
+        // is three waves long and would never earn one; a late endless run
+        // needs one every wave because two of its three boxes are the terms of
+        // that wave and are worth nothing a wave later.
+        let by_wave = matches!(written, Some((ModeKind::Tutorial, _)))
+            || (written.is_none() && self.wave >= RULE_OFFER_WAVE);
         if !by_wave {
             if self.total_score() < self.next_offer_score {
                 return;
@@ -877,6 +882,8 @@ impl Game {
             kind,
             level,
             held,
+            self.wave,
+            self.waves.rule,
             timer,
             &mut self.offer_rng,
         ));
@@ -890,6 +897,13 @@ impl Game {
         let choice = offer.choices[index];
         let v = self.viewport;
         let (x, y) = (choice.body.x, choice.body.y);
+        // A modifier belongs to the wave rather than to a player, and it lasts
+        // exactly the one wave: the next `begin_wave` rolls over it. Set here
+        // rather than pinned, so it is a term for this fight and not a rule
+        // for the rest of the run.
+        if let OfferItem::Rule(rule) = choice.item {
+            self.waves.rule = rule;
+        }
         // Everyone gets it: one offer stands in the lull and either player may
         // be the one to reach it.
         for p in self.players.iter_mut() {
@@ -899,6 +913,7 @@ impl Game {
                     p.attack_level = level;
                 }
                 OfferItem::Boon(boon) => p.boons.take(boon),
+                OfferItem::Rule(_) => {}
             }
         }
         self.explosions.push(Explosion::new(x, y, &v));
@@ -1633,11 +1648,20 @@ impl Game {
             }
 
             // Movement is held state, so it is simply mirrored each tick.
+            //
+            // On a no-footing wave the ground gives nothing back: the facing
+            // still turns, so a swing can be aimed and a dash pointed, but the
+            // step itself is only taken once the player has left the floor.
+            // Turning has to keep working or the wave would take away aiming
+            // as well, which is not what it is about.
+            let rooted =
+                self.waves.rule == WaveRule::NoFooting && self.players[i].grounded;
+            let step = if rooted { 0.0 } else { v.wper(PLAYER_MOVE_PCT) };
             if intent.left && !intent.right {
-                self.players[i].ax = -v.wper(PLAYER_MOVE_PCT);
+                self.players[i].ax = -step;
                 self.players[i].facing_right = false;
             } else if intent.right && !intent.left {
-                self.players[i].ax = v.wper(PLAYER_MOVE_PCT);
+                self.players[i].ax = step;
                 self.players[i].facing_right = true;
             } else {
                 self.players[i].ax = 0.0;
@@ -2715,14 +2739,36 @@ impl Game {
         self.zombies.remove(i);
     }
 
+    /// How many husks this enemy may keep standing, this wave.
+    ///
+    /// Its own number, except on a HOLD THE LINE wave. That rule stops the
+    /// camera and walls the player into one screen, and the shedder boss keeps
+    /// every husk it has ever left - which everywhere else is ground the player
+    /// gives up and walks away from, and there is a room filling up with no
+    /// way out of it.
+    ///
+    /// Read per shed rather than fixed when the enemy spawns, so it is the rule
+    /// in force that decides. An enemy already over the cap trims down to it on
+    /// its next shed rather than holding what it had.
+    fn husk_cap(&self, i: usize) -> usize {
+        let own = self.zombies[i].max_husks;
+        if self.waves.rule == WaveRule::StaticCamera {
+            own.min(STATIC_CAMERA_HUSKS)
+        } else {
+            own
+        }
+    }
+
     fn shed_and_flee(&mut self, i: usize) {
         let v = self.viewport;
         let body = self.zombies[i].body;
 
-        if self.zombies[i].max_husks > 0 {
-            // One in, one out for an ordinary shedder. The boss's cap is never
-            // reached, so it keeps every husk it has left.
-            while self.zombies[i].husks.len() >= self.zombies[i].max_husks {
+        let cap = self.husk_cap(i);
+        if cap > 0 {
+            // One in, one out for an ordinary shedder. The boss's cap is only
+            // ever reached on a walled-in wave; anywhere else it keeps every
+            // husk it has left.
+            while self.zombies[i].husks.len() >= cap {
                 self.zombies[i].husks.remove(0);
             }
             self.zombies[i].husks.push(body);

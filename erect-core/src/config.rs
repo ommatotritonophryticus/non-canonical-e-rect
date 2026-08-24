@@ -217,6 +217,17 @@ pub const BULLET_SPEED_MULT: f32 = 4.0;
 /// to trade.
 pub const BULLET_HIT_TICKS: i32 = 3;
 
+/// The wave from which the lull stops being about power and starts being about
+/// terms.
+///
+/// From here two of the three boxes carry a modifier for the wave that is about
+/// to start rather than an upgrade, and one still carries an upgrade - so the
+/// choice becomes "get stronger, or set the terms you get stronger under".
+/// Twenty-six, because by then the ladder of upgrades is spent: the roster is
+/// on offer at its top level from the same wave, and there is nothing further
+/// for a box to hand over.
+pub const RULE_OFFER_WAVE: i64 = 26;
+
 /// How dim a box is drawn on its last tick, as a fraction of the player's
 /// colour.
 ///
@@ -315,6 +326,17 @@ pub const SHEDDER_BOSS_HEALTH_WAVE: i64 = 5;
 /// Its health bounds this on its own - a husk per hit, and it has a fixed
 /// number of hits in it - so there is no runaway to guard against.
 pub const SHEDDER_BOSS_HUSKS: usize = usize::MAX;
+
+/// Husks any shedder may keep standing on a HOLD THE LINE wave.
+///
+/// That rule stops the camera and walls the player into a single screen, which
+/// is the one place "every husk it has ever left" stops being a fight and
+/// starts being a room filling up. Two is enough to still have to be worked
+/// around, and few enough that there is always floor left to stand on.
+///
+/// A cap rather than a replacement: an ordinary shedder already keeps fewer
+/// than this and is left exactly as it was.
+pub const STATIC_CAMERA_HUSKS: usize = 2;
 
 pub const MAX_PLAYERS: usize = 2;
 /// HP a downed player comes back with at the start of the next wave.

@@ -83,6 +83,7 @@ impl Harness {
         let mut boons = false;
         let mut screen: Option<String> = None;
         let mut once = false;
+        let mut lull = false;
         let mut written: Option<(erect_core::campaign::ModeKind, erect_core::attack::AttackKind)> =
             None;
         let mut wall = erect_core::boon::WallMod::Plain;
@@ -94,6 +95,7 @@ impl Harness {
                 "rule" => {
                     dev.rule = match value {
                         "blind" => Some(erect_core::waves::WaveRule::Hidden),
+                        "nofooting" => Some(erect_core::waves::WaveRule::NoFooting),
                         _ => None,
                     }
                 }
@@ -115,6 +117,9 @@ impl Harness {
                     }
                 }
                 "once" => once = value != "0",
+                // Opens in the between-wave countdown, which is the only time
+                // the wave's modifiers are announced on screen.
+                "lull" => lull = value != "0",
                 "level" => dev.attack_level = value.parse().unwrap_or(1),
                 // `arm=trap` - what a dev run starts holding, by the label the
                 // offer screen shows.
@@ -203,6 +208,31 @@ impl Harness {
                 }
                 None => game.start_dev_run(),
             },
+        }
+        if lull {
+            game.waves.begin_countdown(erect_core::config::WAVE_COUNTDOWN_SECONDS);
+            // And stand what that lull would be offering. Rolled the same way
+            // the core rolls it, because the point of the flag is to look at
+            // the real thing: reaching wave twenty-six by playing is not
+            // something this harness's fighter can do.
+            if let Some(p) = game.players.first() {
+                let (kind, level, held) = (p.attack, p.attack_level, p.boons);
+                let v = game.viewport;
+                let ground = v.hper(erect_core::config::GROUND_Y_PCT);
+                let mut rng = erect_core::entities::Rng::new(dev.score.max(1) as u64);
+                game.offer = Some(erect_core::offer::Offer::roll(
+                    &v,
+                    game.camera_x,
+                    ground,
+                    kind,
+                    level,
+                    held,
+                    game.wave,
+                    game.waves.rule,
+                    game.timer,
+                    &mut rng,
+                ));
+            }
         }
         shots.sort_by_key(|(at, _)| *at);
         if boons || wall != erect_core::boon::WallMod::Plain {

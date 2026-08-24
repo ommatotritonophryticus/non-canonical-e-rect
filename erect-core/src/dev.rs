@@ -28,13 +28,14 @@ const KINDS: [Option<WaveKind>; 6] = [
     Some(WaveKind::JumpersOnly),
 ];
 
-const RULES: [Option<WaveRule>; 6] = [
+const RULES: [Option<WaveRule>; 7] = [
     None,
     Some(WaveRule::Normal),
     Some(WaveRule::StaticCamera),
     Some(WaveRule::NoJumps),
     Some(WaveRule::NoWall),
     Some(WaveRule::Hidden),
+    Some(WaveRule::NoFooting),
 ];
 
 /// Every attack the menu can hand out, with the one the game starts on first.

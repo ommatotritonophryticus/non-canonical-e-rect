@@ -13,8 +13,10 @@ use alloc::string::{String, ToString};
 
 use crate::attack::{AttackKind, MAX_LEVEL};
 use crate::boon::{Boon, Boons};
+use crate::config::RULE_OFFER_WAVE;
 use crate::entities::Rng;
 use crate::geom::{Body, Viewport};
+use crate::waves::WaveRule;
 
 /// Team score between offers.
 pub const OFFER_SCORE_STEP: i64 = 4000;
@@ -60,6 +62,10 @@ pub enum OfferItem {
         level: u8,
     },
     Boon(Boon),
+    /// Terms for the wave about to start, rather than anything the player
+    /// keeps. Only appears from [`RULE_OFFER_WAVE`], and only for the one wave
+    /// it is taken in: the next lull asks again.
+    Rule(WaveRule),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -76,11 +82,13 @@ impl OfferChoice {
 
     /// What the option says above its head.
     ///
-    /// A level is only worth printing when it is a step up from what is already
-    /// carried; on a fresh weapon it would just read as noise.
+    /// The level is printed whenever it is not the first one - on the weapon
+    /// already carried, that is the step up being offered; on a different one,
+    /// it is how much of the climb comes with it. Only a plain level 1 goes
+    /// unmarked, where the number would read as noise.
     pub fn label(&self, current: AttackKind) -> String {
         match self.item {
-            OfferItem::Attack { kind, level } if kind == current => {
+            OfferItem::Attack { kind, level } if kind == current || level > 1 => {
                 let mut text = kind.label().to_string();
                 text.push(' ');
                 text.push((b'0' + level) as char);
@@ -88,6 +96,9 @@ impl OfferChoice {
             }
             OfferItem::Attack { kind, .. } => kind.label().to_string(),
             OfferItem::Boon(boon) => boon.label().to_string(),
+            // A modifier with no label is the plain wave, which is a real
+            // choice here: it is the option to be left alone.
+            OfferItem::Rule(rule) => rule.label().unwrap_or("PLAIN").to_string(),
         }
     }
 
@@ -104,6 +115,9 @@ impl OfferChoice {
             OfferItem::Attack { level, .. } if level >= MAX_LEVEL => "MASTER",
             OfferItem::Attack { kind, .. } => kind.role(),
             OfferItem::Boon(_) => "",
+            // Said on every one of them, because the thing a player has to
+            // know about a modifier is that it is not kept.
+            OfferItem::Rule(_) => "THIS WAVE",
         }
     }
 }
@@ -185,11 +199,53 @@ impl Offer {
         current: AttackKind,
         level: u8,
         held: Boons,
+        wave: i64,
+        rolled: WaveRule,
         timer: i64,
         rng: &mut Rng,
     ) -> Self {
-        let (pool, n) = build_pool(current, level, held, None);
-        Self::draw(v, camera_x, ground_y, pool, n, timer, rng)
+        let (pool, n) = build_pool(current, level, held, None, wave);
+        if wave < RULE_OFFER_WAVE {
+            return Self::draw(v, camera_x, ground_y, pool, n, timer, rng);
+        }
+
+        // Late on, two of the three boxes stop being upgrades. One still is -
+        // the run should never stop offering anything at all - and the other
+        // two are the terms the coming wave will be fought under.
+        let mut offer = Self::empty(timer);
+        let mut count = 0;
+        let picked = Self::draw(v, camera_x, ground_y, pool, n, timer, rng);
+        if picked.count > 0 {
+            offer.choices[0] = picked.choices[0];
+            count += 1;
+        }
+
+        // Whatever the wave already rolled is left out: taking it would be a
+        // box that changes nothing, and two of the three boxes here are the
+        // only choice the player has left.
+        let mut rules = [OfferItem::Boon(Boon::DoubleJump); POOL_MAX];
+        let mut rn = 0;
+        for rule in WaveRule::EVERY {
+            if rule != rolled {
+                rules[rn] = OfferItem::Rule(rule);
+                rn += 1;
+            }
+        }
+        for i in 0..(OFFER_CHOICES - count).min(rn) {
+            let j = i + (rng.range(0, (rn - i - 1) as i32).max(0) as usize);
+            rules.swap(i, j);
+            offer.choices[count + i] = OfferChoice {
+                item: rules[i],
+                body: Body::default(),
+            };
+        }
+        offer.count = (count + (OFFER_CHOICES - count).min(rn)).min(OFFER_CHOICES);
+        // Placed only once the count is settled, or they would stand at the
+        // spacing of an offer that never existed.
+        for i in 0..offer.count {
+            offer.choices[i].body = Self::stand(v, camera_x, ground_y, offer.count, i);
+        }
+        offer
     }
 
     /// The same draw with the roster taken out of it: `weapon` and no other.
@@ -214,7 +270,9 @@ impl Offer {
         timer: i64,
         rng: &mut Rng,
     ) -> Self {
-        let (pool, n) = build_pool(current, level, held, Some(weapon));
+        // A campaign keeps its own shape all the way through, modifiers
+        // included: its pool is the point of the mode.
+        let (pool, n) = build_pool(current, level, held, Some(weapon), 1);
         Self::draw(v, camera_x, ground_y, pool, n, timer, rng)
     }
 
@@ -265,6 +323,7 @@ fn build_pool(
     level: u8,
     held: Boons,
     roster: Option<AttackKind>,
+    wave: i64,
 ) -> ([OfferItem; POOL_MAX], usize) {
     let mut pool = [OfferItem::Attack { kind: AttackKind::Basic, level: 1 }; POOL_MAX];
     let mut n = 0;
@@ -273,6 +332,9 @@ fn build_pool(
             // `Basic` is not a weapon that can be picked up or levelled, so a
             // campaign for it is a campaign of boons.
             if weapon != AttackKind::Basic {
+                // Always at level one: this is the weapon the campaign was
+                // started for arriving for the first time, not a swap away
+                // from something else, so there is nothing to discount from.
                 if current != weapon {
                     pool[n] = OfferItem::Attack { kind: weapon, level: 1 };
                     n += 1;
@@ -287,9 +349,29 @@ fn build_pool(
                 pool[n] = OfferItem::Attack { kind: current, level: level + 1 };
                 n += 1;
             }
+            // Another weapon arrives one level short of what is already being
+            // carried, never below one. A swap therefore costs a single step
+            // rather than the whole climb, which is what it used to cost: a
+            // run that had reached the third level of anything could not look
+            // at the roster again without throwing two levels away, so it
+            // never did, and the second half of every run played itself.
+            //
+            // One short and not level: the weapon in hand should still be
+            // worth having kept.
+            //
+            // From [`RULE_OFFER_WAVE`] the discount stops being a discount and
+            // the whole roster comes at its top level. By then a swap has to
+            // be a real option inside a single wave: there is no run left to
+            // spend climbing back up, and the boxes beside it are handing out
+            // terms rather than levels.
+            let swap = if wave >= RULE_OFFER_WAVE {
+                MAX_LEVEL
+            } else {
+                level.clamp(1, MAX_LEVEL).saturating_sub(1).max(1)
+            };
             for kind in AttackKind::ALL {
                 if kind != current {
-                    pool[n] = OfferItem::Attack { kind, level: 1 };
+                    pool[n] = OfferItem::Attack { kind, level: swap };
                     n += 1;
                 }
             }

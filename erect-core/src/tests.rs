@@ -1982,7 +1982,7 @@ fn the_two_wave_axes_are_independent() {
     // change the rules, which one combined enum could never express.
     let mut rng = Rng::new(9001);
     let mut seen_both = false;
-    let mut rule_counts = [0usize; 5];
+    let mut rule_counts = [0usize; 6];
     for _ in 0..4000 {
         let mut waves = WaveManager::default();
         waves.begin_wave(6, &mut rng);
@@ -1995,6 +1995,7 @@ fn the_two_wave_axes_are_independent() {
             WaveRule::NoJumps => 2,
             WaveRule::NoWall => 3,
             WaveRule::Hidden => 4,
+            WaveRule::NoFooting => 5,
         }] += 1;
     }
     assert!(seen_both, "a wave should be able to carry one of each");
@@ -2242,7 +2243,7 @@ fn every_wave_modifier_comes_up_equally_often() {
     // `range(0, 4)` over four variants let the catch-all arm swallow two values
     // and the last variant appeared twice as often as its siblings.
     let mut rng = Rng::new(12345);
-    let mut rules = [0usize; 5];
+    let mut rules = [0usize; 6];
     let mut kinds = [0usize; 5];
     let n = 60000;
     for _ in 0..n {
@@ -2254,6 +2255,7 @@ fn every_wave_modifier_comes_up_equally_often() {
             WaveRule::NoJumps => 2,
             WaveRule::NoWall => 3,
             WaveRule::Hidden => 4,
+            WaveRule::NoFooting => 5,
         }] += 1;
         kinds[match waves.kind {
             WaveKind::Mixed => 0,
@@ -2264,14 +2266,17 @@ fn every_wave_modifier_comes_up_equally_often() {
         }] += 1;
     }
 
-    for (name, counts) in [("rule", rules), ("kind", kinds)] {
+    // Sliced rather than taken by value: the two ladders no longer have the
+    // same number of variants, and the share each one is owed is worked out
+    // from its own length so adding another to either stays a one-line change.
+    for (name, counts) in [("rule", &rules[..]), ("kind", &kinds[..])] {
         let special: usize = counts[1..].iter().sum();
         let rate = special as f64 / n as f64;
         assert!(
             (rate - 0.25).abs() < 0.02,
             "{name}: {rate:.3} of waves were special, wanted a quarter"
         );
-        let expected = special as f64 / 4.0;
+        let expected = special as f64 / (counts.len() - 1) as f64;
         for (i, c) in counts[1..].iter().enumerate() {
             let off = (*c as f64 - expected).abs() / expected;
             assert!(
@@ -5828,7 +5833,7 @@ fn a_boon_already_held_is_never_offered_again() {
     let mut rng = Rng::new(31337);
     let held = Boons { double_jump: true, shield: true, ..Default::default() };
     for _ in 0..500 {
-        let offer = Offer::roll(&v, 0.0, 700.0, AttackKind::Basic, 1, held, 0, &mut rng);
+        let offer = Offer::roll(&v, 0.0, 700.0, AttackKind::Basic, 1, held, 1, WaveRule::Normal, 0, &mut rng);
         for choice in offer.choices.iter() {
             if let OfferItem::Boon(boon) = choice.item {
                 assert!(!held.has(boon), "{boon:?} was offered though it is held");
@@ -5854,7 +5859,7 @@ fn a_drained_pool_has_only_the_wall_swap_left() {
     let mut weapons = 0;
     let mut boons = 0;
     for _ in 0..200 {
-        let offer = Offer::roll(&v, 0.0, 700.0, AttackKind::Hammer, 2, all, 0, &mut rng);
+        let offer = Offer::roll(&v, 0.0, 700.0, AttackKind::Hammer, 2, all, 1, WaveRule::Normal, 0, &mut rng);
         for choice in offer.choices.iter() {
             match choice.item {
                 OfferItem::Attack { .. } => weapons += 1,
@@ -5862,6 +5867,7 @@ fn a_drained_pool_has_only_the_wall_swap_left() {
                     assert_eq!(b, Boon::WallPull, "a spent boon came back round");
                     boons += 1;
                 }
+                OfferItem::Rule(r) => panic!("an early wave offered terms: {r:?}"),
             }
         }
     }
@@ -5882,6 +5888,8 @@ fn every_boon_can_come_up() {
             AttackKind::Basic,
             1,
             Boons::default(),
+            1,
+            WaveRule::Normal,
             0,
             &mut rng,
         );
@@ -5891,6 +5899,7 @@ fn every_boon_can_come_up() {
                     seen[Boon::ALL.iter().position(|x| *x == b).unwrap()] = true
                 }
                 OfferItem::Attack { .. } => saw_weapon = true,
+                OfferItem::Rule(r) => panic!("an early wave offered terms: {r:?}"),
             }
         }
     }
@@ -6159,7 +6168,7 @@ fn holding_one_wall_leaves_the_other_on_the_table() {
     };
     let mut saw_push = false;
     for _ in 0..500 {
-        let offer = Offer::roll(&v, 0.0, 700.0, AttackKind::Basic, 1, held, 0, &mut rng);
+        let offer = Offer::roll(&v, 0.0, 700.0, AttackKind::Basic, 1, held, 1, WaveRule::Normal, 0, &mut rng);
         for choice in offer.choices.iter() {
             if let OfferItem::Boon(b) = choice.item {
                 assert_ne!(b, Boon::WallPull, "the wall it already has was offered");
@@ -6306,6 +6315,7 @@ fn hitting_an_option_arms_every_player() {
             OfferItem::Boon(boon) => {
                 assert!(p.boons.has(boon), "both players should have been given it");
             }
+            OfferItem::Rule(r) => panic!("an early wave offered terms: {r:?}"),
         }
     }
 }
@@ -6520,7 +6530,7 @@ fn every_wave_rule_still_reaches_a_real_run() {
     // The distribution above is the mechanism; this is the thing that broke.
     let mut game = new_game();
     game.start_run(1);
-    let mut seen = alloc::vec![false; 5];
+    let mut seen = alloc::vec![false; 6];
     for _ in 0..400 {
         let was = game.wave;
         for _ in 0..200 {
@@ -6538,6 +6548,7 @@ fn every_wave_rule_still_reaches_a_real_run() {
             WaveRule::NoJumps => 2,
             WaveRule::NoWall => 3,
             WaveRule::Hidden => 4,
+            WaveRule::NoFooting => 5,
         };
         seen[i] = true;
     }
@@ -7447,6 +7458,7 @@ fn a_campaign_offers_boons_and_walls_beside_its_weapon() {
                 OfferItem::Boon(Boon::WallPull | Boon::WallPush) => saw_wall = true,
                 OfferItem::Boon(_) => saw_boon = true,
                 OfferItem::Attack { .. } => {}
+                OfferItem::Rule(r) => panic!("a campaign offered terms: {r:?}"),
             }
         }
     }
@@ -7738,7 +7750,7 @@ fn an_ordinary_run_is_untouched_by_any_of_this() {
         .take(offer.count)
         .filter_map(|c| match c.item {
             OfferItem::Attack { kind, .. } => Some(kind),
-            OfferItem::Boon(_) => None,
+            OfferItem::Boon(_) | OfferItem::Rule(_) => None,
         })
         .collect();
     assert!(!kinds.is_empty(), "the whole roster is still in the pool");
@@ -8011,4 +8023,644 @@ fn a_finished_endless_run_still_returns_to_the_title() {
     confirm.menu.confirm = true;
     game.tick(&confirm);
     assert_eq!(game.state, State::Title);
+}
+
+/* ---------------- the airborne wave ---------------- */
+
+/// Holds a direction for `ticks` and reports how far the player travelled.
+fn walked(game: &mut Game, right: bool, ticks: usize) -> f32 {
+    let mut walk = idle();
+    walk.players[0].right = right;
+    walk.players[0].left = !right;
+    let from = game.players[0].body.x;
+    for _ in 0..ticks {
+        clear_arena(game);
+        game.tick(&walk);
+    }
+    game.players[0].body.x - from
+}
+
+#[test]
+fn a_wave_with_no_footing_takes_the_ground_out_from_under_a_step() {
+    let mut game = game_with_rule(WaveRule::NoFooting);
+    assert!(game.players[0].grounded, "the premise: standing on the floor");
+    assert_eq!(walked(&mut game, true, 30), 0.0, "it walked anyway");
+}
+
+#[test]
+fn a_wave_with_no_footing_still_lets_the_player_turn_on_the_spot() {
+    // Turning has to keep working or the wave would take away aiming as well,
+    // which is not what it is about: a swing and a dash both go whichever way
+    // the player is facing.
+    let mut game = game_with_rule(WaveRule::NoFooting);
+    game.players[0].facing_right = true;
+
+    let mut left = idle();
+    left.players[0].left = true;
+    clear_arena(&mut game);
+    game.tick(&left);
+    assert!(!game.players[0].facing_right, "it would not turn to face left");
+    assert_eq!(game.players[0].ax, 0.0, "and it must not have moved doing it");
+
+    let mut right = idle();
+    right.players[0].right = true;
+    clear_arena(&mut game);
+    game.tick(&right);
+    assert!(game.players[0].facing_right, "nor back to the right");
+}
+
+#[test]
+fn a_wave_with_no_footing_gives_the_step_back_once_the_player_leaves_the_floor() {
+    let mut game = game_with_rule(WaveRule::NoFooting);
+    let mut jump = idle();
+    jump.players[0].jump = true;
+    jump.players[0].right = true;
+    clear_arena(&mut game);
+    game.tick(&jump);
+    assert!(!game.players[0].grounded, "the premise: off the floor");
+
+    let moved = walked(&mut game, true, 6);
+    assert!(moved > 0.0, "airborne, a held direction should carry: {moved}");
+}
+
+#[test]
+fn a_wave_with_no_footing_leaves_the_dash_alone() {
+    // Deliberate: a rule with no answer to standing in a bad place is a trap
+    // rather than a constraint. The dash costs energy and holds a cooldown, so
+    // it is a way off the floor sideways that still has to be paid for - and
+    // it is pointed by the facing, which is why turning stays.
+    let mut game = game_with_rule(WaveRule::NoFooting);
+    let from = game.players[0].body.x;
+    let mut dash = idle();
+    dash.players[0].dash = true;
+    clear_arena(&mut game);
+    game.tick(&dash);
+    for _ in 0..DASH_TICKS {
+        clear_arena(&mut game);
+        game.tick(&idle());
+    }
+    assert!(
+        (game.players[0].body.x - from).abs() > 0.0,
+        "the dash should still carry on an airborne wave"
+    );
+}
+
+#[test]
+fn a_wave_with_no_footing_still_allows_the_jump_it_depends_on() {
+    // Otherwise the wave is not a restriction, it is a locked room.
+    let mut game = game_with_rule(WaveRule::NoFooting);
+    let mut jump = idle();
+    jump.players[0].jump = true;
+    clear_arena(&mut game);
+    game.tick(&jump);
+    assert!(!game.players[0].grounded, "the one way out is shut");
+}
+
+#[test]
+fn every_other_wave_still_walks() {
+    // The gate reads the rule, not the ground, so nothing else may have picked
+    // up a limp.
+    for rule in [
+        WaveRule::Normal,
+        WaveRule::StaticCamera,
+        WaveRule::NoJumps,
+        WaveRule::NoWall,
+        WaveRule::Hidden,
+    ] {
+        let mut game = game_with_rule(rule);
+        let moved = walked(&mut game, true, 20);
+        assert!(moved > 0.0, "{rule:?} stopped the player walking: {moved}");
+    }
+}
+
+#[test]
+fn every_modifier_but_the_plain_one_announces_itself() {
+    // The countdown is the only place a wave says what it is about to do, so a
+    // rule that got added without a label would arrive as an unexplained change
+    // in the controls.
+    for rule in [
+        WaveRule::StaticCamera,
+        WaveRule::NoJumps,
+        WaveRule::NoWall,
+        WaveRule::Hidden,
+        WaveRule::NoFooting,
+    ] {
+        let label = rule.label().unwrap_or_else(|| panic!("{rule:?} says nothing"));
+        assert!(!label.is_empty());
+        // Not the wave *kind*'s words. The two are announced one under the
+        // other, and a rule that borrowed a kind's phrasing would read as a
+        // contradiction on screen.
+        for kind in [
+            WaveKind::GroundOnly,
+            WaveKind::FlyersOnly,
+            WaveKind::BasicOnly,
+            WaveKind::JumpersOnly,
+        ] {
+            assert_ne!(Some(label), kind.label(), "{rule:?} and {kind:?} say the same thing");
+        }
+    }
+    assert_eq!(WaveRule::Normal.label(), None, "a plain wave says nothing");
+}
+
+/* ---------------- swapping weapons ---------------- */
+
+/// Every distinct option a player in this state can be shown, gathered by
+/// rolling the offer many times over.
+fn every_option(current: AttackKind, level: u8) -> alloc::vec::Vec<OfferItem> {
+    every_option_on_wave(current, level, 1)
+}
+
+/// The same, on a stated wave. From [`RULE_OFFER_WAVE`] the shape of an offer
+/// changes, and both shapes have to be reachable from a test.
+fn every_option_on_wave(current: AttackKind, level: u8, wave: i64) -> alloc::vec::Vec<OfferItem> {
+    let game = new_game();
+    let v = game.viewport;
+    let ground = v.hper(GROUND_Y_PCT);
+    let mut out: alloc::vec::Vec<OfferItem> = alloc::vec::Vec::new();
+    for seed in 1..=400u64 {
+        let mut rng = Rng::new(seed);
+        let offer = Offer::roll(
+            &v,
+            0.0,
+            ground,
+            current,
+            level,
+            Boons::default(),
+            wave,
+            WaveRule::Normal,
+            0,
+            &mut rng,
+        );
+        for c in offer.choices.iter().take(offer.count) {
+            if !out.contains(&c.item) {
+                out.push(c.item);
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn another_weapon_arrives_one_level_short_of_the_one_in_hand() {
+    // A swap costs a single step rather than the whole climb. It used to cost
+    // the climb, which meant a run that had reached the third level of
+    // anything could not look at the roster again, and the second half of
+    // every run played itself.
+    for (held_level, expected) in [(1u8, 1u8), (2, 1), (3, 2)] {
+        let seen = every_option(AttackKind::Hammer, held_level);
+        let others: alloc::vec::Vec<(AttackKind, u8)> = seen
+            .iter()
+            .filter_map(|i| match i {
+                OfferItem::Attack { kind, level } if *kind != AttackKind::Hammer => {
+                    Some((*kind, *level))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(!others.is_empty(), "the roster never came up at level {held_level}");
+        for (kind, level) in others {
+            assert_eq!(
+                level, expected,
+                "holding a level {held_level} hammer, {kind:?} was offered at {level}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_weapon_in_hand_is_still_the_only_one_that_climbs() {
+    // One short and not level: what is already carried should still be worth
+    // having kept, so its own step stays a step ahead of any swap.
+    for held_level in 1..MAX_LEVEL {
+        let seen = every_option(AttackKind::Hammer, held_level);
+        let own = seen
+            .iter()
+            .find_map(|i| match i {
+                OfferItem::Attack { kind, level } if *kind == AttackKind::Hammer => Some(*level),
+                _ => None,
+            })
+            .expect("its own next level should be on the table");
+        assert_eq!(own, held_level + 1);
+        assert!(own > held_level.saturating_sub(1).max(1), "a swap matched the climb");
+    }
+}
+
+#[test]
+fn a_run_still_on_the_plain_swing_is_offered_plain_weapons() {
+    // `Basic` has no level to discount from, and one short of one is one.
+    let seen = every_option(AttackKind::Basic, 1);
+    for item in &seen {
+        if let OfferItem::Attack { kind, level } = item {
+            assert_ne!(*kind, AttackKind::Basic, "the plain swing was offered back");
+            assert_eq!(*level, 1, "{kind:?} should arrive fresh");
+        }
+    }
+}
+
+#[test]
+fn a_mastered_weapon_stops_offering_its_own_next_level() {
+    // There isn't one. What it does not stop offering is the roster, which is
+    // the whole point of the discount.
+    let seen = every_option(AttackKind::Hammer, MAX_LEVEL);
+    assert!(
+        !seen
+            .iter()
+            .any(|i| matches!(i, OfferItem::Attack { kind, .. } if *kind == AttackKind::Hammer)),
+        "a mastered weapon was offered another level"
+    );
+    assert!(
+        seen.iter()
+            .any(|i| matches!(i, OfferItem::Attack { kind, .. } if *kind != AttackKind::Hammer)),
+        "and the roster should still be there"
+    );
+}
+
+#[test]
+fn an_option_says_which_level_it_arrives_at() {
+    // A fresh weapon at level two is a different offer from one at level one,
+    // so the box has to say so. Only a plain level 1 goes unmarked.
+    let ground = 0.0;
+    let game = new_game();
+    let v = game.viewport;
+    let stand = |item| Offer::scripted(&v, 0.0, ground, &[item], 0).choices[0];
+
+    let fresh = stand(OfferItem::Attack { kind: AttackKind::Tall, level: 1 });
+    assert_eq!(fresh.label(AttackKind::Hammer), "HEAVY");
+
+    let stepped = stand(OfferItem::Attack { kind: AttackKind::Tall, level: 2 });
+    assert_eq!(stepped.label(AttackKind::Hammer), "HEAVY 2");
+
+    let own = stand(OfferItem::Attack { kind: AttackKind::Hammer, level: 2 });
+    assert_eq!(own.label(AttackKind::Hammer), "HAMMER 2");
+}
+
+#[test]
+fn a_campaign_still_hands_its_own_weapon_over_at_level_one() {
+    // Not a swap away from something else - it is the weapon the run was
+    // started for arriving for the first time, so there is nothing to discount.
+    let game = new_game();
+    let v = game.viewport;
+    let mut rng = Rng::new(3);
+    // Every boon already held, so the pool is the weapon and the wall it is
+    // not carrying - small enough that both stand and neither can be shuffled
+    // out of the three boxes.
+    let held = Boons {
+        double_jump: true,
+        dash_free: true,
+        shield: true,
+        wall: WallMod::Pull,
+    };
+    let offer = Offer::roll_campaign(
+        &v,
+        0.0,
+        v.hper(GROUND_Y_PCT),
+        AttackKind::Tall,
+        AttackKind::Basic,
+        1,
+        held,
+        0,
+        &mut rng,
+    );
+    let weapon = offer
+        .choices
+        .iter()
+        .take(offer.count)
+        .find_map(|c| match c.item {
+            OfferItem::Attack { kind, level } => Some((kind, level)),
+            _ => None,
+        })
+        .expect("the campaign weapon should be on the table");
+    assert_eq!(weapon, (AttackKind::Tall, 1));
+}
+
+/* ---------------- the late offer ---------------- */
+
+#[test]
+fn from_the_late_wave_two_of_the_three_boxes_are_terms() {
+    // One upgrade still stands - the run should never stop offering anything
+    // at all - and the other two are the terms the coming wave is fought under.
+    let game = new_game();
+    let v = game.viewport;
+    let ground = v.hper(GROUND_Y_PCT);
+    for seed in 1..=200u64 {
+        let mut rng = Rng::new(seed);
+        let offer = Offer::roll(
+            &v,
+            0.0,
+            ground,
+            AttackKind::Hammer,
+            2,
+            Boons::default(),
+            RULE_OFFER_WAVE,
+            WaveRule::Normal,
+            0,
+            &mut rng,
+        );
+        assert_eq!(offer.count, 3, "seed {seed}");
+        let rules = offer
+            .choices
+            .iter()
+            .take(offer.count)
+            .filter(|c| matches!(c.item, OfferItem::Rule(_)))
+            .count();
+        assert_eq!(rules, 2, "seed {seed}: {} terms offered", rules);
+    }
+}
+
+#[test]
+fn the_wave_before_the_late_one_still_offers_three_upgrades() {
+    // The line has to be exactly where it says it is.
+    let seen = every_option_on_wave(AttackKind::Hammer, 2, RULE_OFFER_WAVE - 1);
+    assert!(
+        !seen.iter().any(|i| matches!(i, OfferItem::Rule(_))),
+        "terms arrived a wave early"
+    );
+}
+
+#[test]
+fn the_terms_on_offer_are_never_the_ones_the_wave_already_rolled() {
+    // Taking it would be a box that changes nothing, and two of the three
+    // boxes here are the only choice the player has left.
+    let game = new_game();
+    let v = game.viewport;
+    let ground = v.hper(GROUND_Y_PCT);
+    for rolled in WaveRule::EVERY {
+        for seed in 1..=120u64 {
+            let mut rng = Rng::new(seed);
+            let offer = Offer::roll(
+                &v,
+                0.0,
+                ground,
+                AttackKind::Hammer,
+                2,
+                Boons::default(),
+                RULE_OFFER_WAVE,
+                rolled,
+                0,
+                &mut rng,
+            );
+            for c in offer.choices.iter().take(offer.count) {
+                assert_ne!(
+                    c.item,
+                    OfferItem::Rule(rolled),
+                    "{rolled:?} was offered on a wave already carrying it"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_terms_on_offer_are_two_different_ones() {
+    // Two boxes saying the same thing is one box and a wasted one.
+    let game = new_game();
+    let v = game.viewport;
+    let ground = v.hper(GROUND_Y_PCT);
+    for seed in 1..=200u64 {
+        let mut rng = Rng::new(seed);
+        let offer = Offer::roll(
+            &v,
+            0.0,
+            ground,
+            AttackKind::Hammer,
+            2,
+            Boons::default(),
+            RULE_OFFER_WAVE,
+            WaveRule::Normal,
+            0,
+            &mut rng,
+        );
+        let rules: alloc::vec::Vec<OfferItem> = offer
+            .choices
+            .iter()
+            .take(offer.count)
+            .filter(|c| matches!(c.item, OfferItem::Rule(_)))
+            .map(|c| c.item)
+            .collect();
+        assert_ne!(rules[0], rules[1], "seed {seed}: the same term twice");
+    }
+}
+
+#[test]
+fn every_modifier_can_be_drawn_and_they_are_the_rules_not_the_kinds() {
+    // Explicitly the wave's *rules* - what the player may do - and never its
+    // kind, which is who turns up. The two are separate axes and only one of
+    // them is being handed over.
+    // Rolled from a wave already carrying BLIND, so the one rule left out of
+    // the pool is BLIND and every other - the plain wave included - is
+    // reachable.
+    let game = new_game();
+    let v = game.viewport;
+    let ground = v.hper(GROUND_Y_PCT);
+    let mut drawn: alloc::vec::Vec<WaveRule> = alloc::vec::Vec::new();
+    for seed in 1..=400u64 {
+        let mut rng = Rng::new(seed);
+        let offer = Offer::roll(
+            &v,
+            0.0,
+            ground,
+            AttackKind::Hammer,
+            2,
+            Boons::default(),
+            RULE_OFFER_WAVE,
+            WaveRule::Hidden,
+            0,
+            &mut rng,
+        );
+        for c in offer.choices.iter().take(offer.count) {
+            if let OfferItem::Rule(rule) = c.item {
+                if !drawn.contains(&rule) {
+                    drawn.push(rule);
+                }
+            }
+        }
+    }
+    for rule in WaveRule::EVERY {
+        if rule != WaveRule::Hidden {
+            assert!(drawn.contains(&rule), "{rule:?} can never be drawn");
+        }
+    }
+    assert!(
+        drawn.contains(&WaveRule::Normal),
+        "being left alone should be one of the things on offer"
+    );
+    // And nothing that belongs to the other axis leaked in. `WaveKind` has no
+    // representation here at all, which is the strongest form of that.
+    assert_eq!(drawn.len(), WaveRule::EVERY.len() - 1);
+}
+
+#[test]
+fn taking_terms_sets_them_for_the_coming_wave_only() {
+    let mut game = new_game();
+    game.start_run(1);
+    settle_on_floor(&mut game);
+    game.wave = RULE_OFFER_WAVE;
+    // An offer only stands while the game is between waves; outside a lull it
+    // is taken down before it can ever arm.
+    into_the_lull(&mut game);
+    game.waves.rule = WaveRule::Normal;
+
+    let v = game.viewport;
+    let ground = v.hper(GROUND_Y_PCT);
+    game.offer = Some(Offer::scripted(
+        &v,
+        game.camera_x,
+        ground,
+        &[OfferItem::Rule(WaveRule::Hidden)],
+        game.timer,
+    ));
+    let body = game.offer.as_ref().unwrap().choices[0].body;
+    wait_for_armed(&mut game);
+    swing_at(&mut game, 0, body);
+    game.tick(&idle());
+    assert_eq!(game.waves.rule, WaveRule::Hidden, "the term was not applied");
+
+    // A term is not a pin: the wave after this one rolls its own again.
+    assert_eq!(game.waves.forced_rule, None, "it pinned the rest of the run");
+    game.waves.begin_wave(game.wave + 1, &mut game.rng);
+    assert!(
+        game.waves.rule != WaveRule::Hidden || WaveRule::EVERY.len() == 1,
+        "the next wave inherited the term"
+    );
+}
+
+#[test]
+fn the_late_run_is_offered_the_roster_at_its_top_level() {
+    // By then a swap has to be a real option inside a single wave: there is no
+    // run left to spend climbing back up.
+    let seen = every_option_on_wave(AttackKind::Hammer, 1, RULE_OFFER_WAVE);
+    let others: alloc::vec::Vec<(AttackKind, u8)> = seen
+        .iter()
+        .filter_map(|i| match i {
+            OfferItem::Attack { kind, level } if *kind != AttackKind::Hammer => {
+                Some((*kind, *level))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(!others.is_empty(), "the roster never came up");
+    for (kind, level) in others {
+        assert_eq!(level, MAX_LEVEL, "{kind:?} arrived at {level} late on");
+    }
+}
+
+#[test]
+fn a_late_lull_offers_without_being_paid_for() {
+    // Two of its three boxes are the terms of *this* wave and are worth
+    // nothing a wave later, so they cannot wait on a score threshold.
+    let mut game = new_game();
+    game.start_run(1);
+    settle_on_floor(&mut game);
+    game.wave = RULE_OFFER_WAVE;
+    for p in game.players.iter_mut() {
+        p.score = 0;
+    }
+    assert!(game.total_score() < OFFER_SCORE_STEP, "the premise");
+    into_the_lull(&mut game);
+    assert!(game.offer.is_some(), "a late lull should offer anyway");
+}
+
+#[test]
+fn an_earlier_lull_is_still_paid_for() {
+    let mut game = new_game();
+    game.start_run(1);
+    settle_on_floor(&mut game);
+    game.wave = RULE_OFFER_WAVE - 2;
+    for p in game.players.iter_mut() {
+        p.score = 0;
+    }
+    into_the_lull(&mut game);
+    assert!(game.offer.is_none(), "an early offer has to be earned");
+}
+
+#[test]
+fn a_term_box_says_it_is_only_for_this_wave() {
+    // The one thing a player has to know about a modifier is that it is not
+    // kept, unlike everything else a box has ever handed over.
+    let game = new_game();
+    let v = game.viewport;
+    let stand = |item| Offer::scripted(&v, 0.0, 0.0, &[item], 0).choices[0];
+    let blind = stand(OfferItem::Rule(WaveRule::Hidden));
+    assert_eq!(blind.label(AttackKind::Basic), "BLIND");
+    assert_eq!(blind.role(), "THIS WAVE");
+
+    let plain = stand(OfferItem::Rule(WaveRule::Normal));
+    assert_eq!(plain.label(AttackKind::Basic), "PLAIN", "the plain wave needs a word");
+}
+
+/// A shedder boss standing in reach, with health enough to be hit repeatedly.
+fn plant_shedder_boss(game: &mut Game) -> Body {
+    let v = game.viewport;
+    let mut z = Zombie::shedder_boss(&v, &mut game.rng);
+    z.body.y = v.hper(GROUND_Y_PCT) - z.body.h;
+    z.body.x = game.players[0].body.x + v.wper(6.0);
+    z.hp = 1_000_000.0;
+    z.hpmax = 1_000_000.0;
+    let body = z.body;
+    game.zombies.push(z);
+    body
+}
+
+/// Hits the shedder `times` over, chasing it down after each hit, and reports
+/// how many husks it ended up standing.
+fn husks_after_hits(game: &mut Game, times: usize) -> usize {
+    for _ in 0..times {
+        let body = the_shedder(game).body;
+        // It is out of reach after every hit, so walk to it first.
+        game.players[0].body.x = body.x - game.players[0].body.w;
+        swing_at(game, 0, body);
+        game.tick(&idle());
+    }
+    the_shedder(game).husks.len()
+}
+
+#[test]
+fn a_walled_in_wave_caps_what_the_shedder_boss_leaves_behind() {
+    // HOLD THE LINE stops the camera and walls the player into one screen. A
+    // boss that keeps every husk it has ever left turns that into a room
+    // filling up with no way out of it.
+    let mut game = game_with_rule(WaveRule::StaticCamera);
+    plant_shedder_boss(&mut game);
+    assert_eq!(husks_after_hits(&mut game, 8), STATIC_CAMERA_HUSKS);
+}
+
+#[test]
+fn anywhere_else_the_shedder_boss_still_keeps_every_husk() {
+    // The arena is open on every other wave, so its husks are ground the
+    // player gives up and walks away from.
+    let mut game = game_with_rule(WaveRule::Normal);
+    plant_shedder_boss(&mut game);
+    let left = husks_after_hits(&mut game, 8);
+    assert!(
+        left > STATIC_CAMERA_HUSKS,
+        "an open wave should not have capped it: {left}"
+    );
+}
+
+#[test]
+fn the_cap_never_raises_what_an_ordinary_shedder_keeps() {
+    // It already keeps fewer, and a cap is a ceiling rather than a quota.
+    assert!(SHEDDER_HUSKS <= STATIC_CAMERA_HUSKS, "the cap is below the ordinary count");
+    let mut game = game_with_rule(WaveRule::StaticCamera);
+    plant_shedder(&mut game);
+    // Enough health to survive being hit five times; an ordinary one has not.
+    if let Some(z) = game.zombies.iter_mut().find(|z| z.behaviors.shed) {
+        z.hp = 1_000_000.0;
+        z.hpmax = 1_000_000.0;
+    }
+    assert_eq!(husks_after_hits(&mut game, 5), SHEDDER_HUSKS);
+}
+
+#[test]
+fn a_boss_already_over_the_cap_trims_down_to_it() {
+    // The rule can be chosen in the lull from `RULE_OFFER_WAVE`, so a wave can
+    // begin walled in with a boss that was not. It gives ground back on its
+    // next shed rather than holding what it had.
+    let mut game = game_with_rule(WaveRule::Normal);
+    plant_shedder_boss(&mut game);
+    let before = husks_after_hits(&mut game, 8);
+    assert!(before > STATIC_CAMERA_HUSKS, "the premise: {before} husks standing");
+
+    game.waves.rule = WaveRule::StaticCamera;
+    assert_eq!(husks_after_hits(&mut game, 1), STATIC_CAMERA_HUSKS);
 }

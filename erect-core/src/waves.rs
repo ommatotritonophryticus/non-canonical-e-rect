@@ -207,10 +207,36 @@ pub enum WaveRule {
     /// Nothing visible but the player, its attacks, blasts and score popups.
     /// Almost harmless, since fighting blind otherwise is not a fight.
     Hidden,
+    /// The ground gives no traction. Standing on it, the player can turn to
+    /// face either way but cannot walk anywhere; every step across the arena
+    /// has to be jumped. The dash still works, so there is a way off a bad
+    /// piece of floor that does not need height.
+    ///
+    /// Named for what it takes away rather than for what it leaves, because
+    /// the wave *kind* beside it may already be reading GROUND ONLY - which is
+    /// about who spawns, not about how the player moves. "GROUND ONLY /
+    /// AIRBORNE" on one screen reads as a contradiction; "GROUND ONLY / NO
+    /// FOOTING" reads as two facts.
+    NoFooting,
 }
 
 impl WaveRule {
     const CHANCE: f32 = 0.25;
+
+    /// Every modifier a wave can carry, the plain one included.
+    ///
+    /// The order is the offer's, not the roll's - the roll picks by number and
+    /// must not be rewired to walk this. `Normal` is a member because from
+    /// [`crate::config::RULE_OFFER_WAVE`] "leave the wave alone" is itself one
+    /// of the things a box can offer.
+    pub const EVERY: [WaveRule; 6] = [
+        WaveRule::Normal,
+        WaveRule::StaticCamera,
+        WaveRule::NoJumps,
+        WaveRule::NoWall,
+        WaveRule::Hidden,
+        WaveRule::NoFooting,
+    ];
 
     pub fn label(self) -> Option<&'static str> {
         match self {
@@ -219,6 +245,7 @@ impl WaveRule {
             WaveRule::NoJumps => Some("GROUNDED"),
             WaveRule::NoWall => Some("NO WALL"),
             WaveRule::Hidden => Some("BLIND"),
+            WaveRule::NoFooting => Some("NO FOOTING"),
         }
     }
 
@@ -244,14 +271,16 @@ impl WaveRule {
         if wave <= 1 || rng.unit() >= Self::CHANCE {
             return WaveRule::Normal;
         }
-        // `range` is inclusive at both ends, so four variants need 0..=3. With
-        // 0..=4 the catch-all swallowed two values and the last variant came up
-        // twice as often as the rest.
-        match rng.range(0, 3) {
+        // `range` is inclusive at both ends, so five variants need 0..=4. Get
+        // this wrong low and the catch-all swallows two values, and the last
+        // variant comes up twice as often as the rest; get it wrong high and
+        // one of them never comes up at all.
+        match rng.range(0, 4) {
             0 => WaveRule::StaticCamera,
             1 => WaveRule::NoJumps,
             2 => WaveRule::NoWall,
-            _ => WaveRule::Hidden,
+            3 => WaveRule::Hidden,
+            _ => WaveRule::NoFooting,
         }
     }
 }
