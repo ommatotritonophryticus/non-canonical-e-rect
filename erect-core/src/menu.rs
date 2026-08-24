@@ -30,6 +30,15 @@ pub enum MenuAction {
     /// that it was asked for.
     Quit,
 
+    /* campaign select */
+    /// Pages through the weapons a campaign can be played for.
+    AdjustCampaignWeapon,
+    /// Flips between the tutorial and the campaign for the chosen weapon.
+    AdjustCampaignMode,
+    /// Begins the campaign the screen is showing.
+    StartCampaign,
+    OpenCampaigns,
+
     /* developer menu */
     AdjustDevWave,
     AdjustDevScore,
@@ -74,6 +83,8 @@ impl MenuRow {
                 | MenuAction::AdjustDevDashFree
                 | MenuAction::AdjustDevShield
                 | MenuAction::AdjustDevWall
+                | MenuAction::AdjustCampaignWeapon
+                | MenuAction::AdjustCampaignMode
         )
     }
 }

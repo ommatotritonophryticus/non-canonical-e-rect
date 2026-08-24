@@ -12,6 +12,8 @@ use crate::config::{
     boss_hp, elite_group_size, elites_in_wave as elite_count, wave_budget, ROLLED_BOSS_WAVE,
 };
 use crate::color::Rgb;
+use crate::campaign::ModeKind;
+use crate::game::RunMode;
 use crate::recipe::marks as recipe_marks;
 use crate::recipe::MAX_MARKS;
 use crate::waves::BossKind;
@@ -7171,4 +7173,667 @@ fn a_mastered_shot_carries_on_the_way_it_was_going() {
             "facing_right={facing_right}: it turned round"
         );
     }
+}
+
+/* ---------------- the campaign ---------------- */
+
+/// A campaign for `weapon`, standing in its first lull.
+fn campaign_run(weapon: AttackKind) -> Game {
+    written_run(ModeKind::Campaign, weapon)
+}
+
+/// A written run of either mode for `weapon`, standing in its first lull.
+fn written_run(kind: ModeKind, weapon: AttackKind) -> Game {
+    let mut game = new_game();
+    game.start_written(kind, weapon, 1);
+    settle_on_floor(&mut game);
+    game
+}
+
+/// The same, without paying. A tutorial's offers are paced by its waves rather
+/// than by its score, so this is the only way to see them.
+fn next_offer_unpaid(game: &mut Game) -> Option<alloc::vec::Vec<OfferItem>> {
+    into_the_lull(game);
+    let out = game
+        .offer
+        .as_ref()
+        .map(|o| o.choices.iter().take(o.count).map(|c| c.item).collect());
+    // Take the first one, so the run carries what the script gave it.
+    if let Some(offer) = game.offer.as_ref() {
+        if offer.count > 0 {
+            let body = offer.choices[0].body;
+            wait_for_armed(game);
+            swing_at(game, 0, body);
+            game.tick(&idle());
+        }
+    }
+    game.offer = None;
+    game.waves.skip_countdown();
+    out
+}
+
+/// Ends the wave in progress at once, by spending its budget for it.
+///
+/// A campaign runs a dozen waves and more, and by then a wave's budget takes
+/// longer to spawn than [`into_the_lull`] will wait. Nothing here is testing
+/// how a wave paces itself, so the budget is simply declared spent.
+fn skip_the_wave(game: &mut Game) {
+    game.spawn_count = wave_budget(game.wave);
+    for _ in 0..600 {
+        game.zombies.clear();
+        game.flyers.clear();
+        game.tick(&idle());
+        if game.waves.between_waves() || game.result.is_some() {
+            return;
+        }
+    }
+    panic!("the wave never cleared");
+}
+
+/// Clears a wave and reports what stood in the lull, taking the weapon upgrade
+/// if one was offered and the first box otherwise.
+///
+/// Taking the weapon on sight is the short, thin campaign - which is exactly
+/// the run these tests want, because it is the one that reaches the end.
+fn next_campaign_offer(game: &mut Game) -> Option<alloc::vec::Vec<OfferItem>> {
+    // The offer is triggered by score, so give it one.
+    game.players[0].score += crate::offer::OFFER_SCORE_STEP;
+    skip_the_wave(game);
+    let Some(offer) = game.offer.as_ref() else {
+        game.waves.skip_countdown();
+        return None;
+    };
+    let items: alloc::vec::Vec<OfferItem> =
+        offer.choices.iter().take(offer.count).map(|c| c.item).collect();
+    let pick = items
+        .iter()
+        .position(|i| matches!(i, OfferItem::Attack { .. }))
+        .unwrap_or(0);
+    let body = offer.choices[pick].body;
+    wait_for_armed(game);
+    swing_at(game, 0, body);
+    game.tick(&idle());
+    game.offer = None;
+    game.waves.skip_countdown();
+    Some(items)
+}
+
+#[test]
+fn a_campaign_offers_boons_and_walls_beside_its_weapon() {
+    // The whole point of the mode is that it is a real run with one weapon in
+    // it, not a delivery route for three upgrades.
+    let mut game = campaign_run(AttackKind::Hammer);
+    let mut saw_boon = false;
+    let mut saw_wall = false;
+    for _ in 0..12 {
+        let Some(offered) = next_campaign_offer(&mut game) else { continue };
+        for item in offered {
+            match item {
+                OfferItem::Boon(Boon::WallPull | Boon::WallPush) => saw_wall = true,
+                OfferItem::Boon(_) => saw_boon = true,
+                OfferItem::Attack { .. } => {}
+            }
+        }
+    }
+    assert!(saw_boon, "a campaign never offered a boon");
+    assert!(saw_wall, "a campaign never offered a wall");
+}
+
+#[test]
+fn a_campaign_never_offers_another_weapon() {
+    // The whole shape of the mode: one weapon, learned, rather than a handful
+    // collected. It is the roster the campaign takes away, not the choosing.
+    let mut game = campaign_run(AttackKind::Tall);
+    for _ in 0..12 {
+        let Some(offered) = next_campaign_offer(&mut game) else { continue };
+        for item in offered {
+            if let OfferItem::Attack { kind, .. } = item {
+                assert_eq!(kind, AttackKind::Tall, "a second weapon was offered");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_campaign_offers_the_weapon_once_per_level_and_then_stops() {
+    // Level one as a pick-up, then two and three as steps, and after that the
+    // pool is boons alone.
+    let mut game = campaign_run(AttackKind::Hammer);
+    let mut levels = alloc::vec::Vec::new();
+    for _ in 0..14 {
+        let Some(offered) = next_campaign_offer(&mut game) else { continue };
+        for item in offered {
+            if let OfferItem::Attack { kind, level } = item {
+                assert_eq!(kind, AttackKind::Hammer);
+                levels.push(level);
+            }
+        }
+    }
+    assert_eq!(levels, alloc::vec![1, 2, 3], "levels offered, in order");
+    assert_eq!(game.players[0].attack, AttackKind::Hammer);
+    assert_eq!(game.players[0].attack_level, MAX_LEVEL);
+}
+
+#[test]
+fn a_plain_campaign_offers_no_weapon_at_all() {
+    // And so keeps the combo finisher, which every weapon in the roster trades
+    // away on being picked up. Its pool is boons and nothing else.
+    let mut game = campaign_run(AttackKind::Basic);
+    for _ in 0..8 {
+        let Some(offered) = next_campaign_offer(&mut game) else { continue };
+        for item in offered {
+            assert!(
+                matches!(item, OfferItem::Boon(_)),
+                "the plain campaign offered {item:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_wall_already_carried_is_never_offered_back() {
+    // The two walls are one setting, and both may stand together while neither
+    // is held - that is the genuine choice between them. What must not happen
+    // is being offered the one already carried, which would be a box that does
+    // nothing.
+    let mut game = campaign_run(AttackKind::Basic);
+    game.players[0].boons.take(Boon::WallPull);
+    for _ in 0..10 {
+        // Read before the offer: the box taken last round may itself have been
+        // the other wall, and then it is that one that must not come back.
+        let held = game.players[0].boons.wall;
+        let Some(offered) = next_campaign_offer(&mut game) else { continue };
+        let back = match held {
+            WallMod::Pull => Some(OfferItem::Boon(Boon::WallPull)),
+            WallMod::Push => Some(OfferItem::Boon(Boon::WallPush)),
+            WallMod::Plain => None,
+        };
+        if let Some(back) = back {
+            assert!(
+                !offered.contains(&back),
+                "the wall already in hand was offered again: {offered:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn both_walls_may_stand_together_while_neither_is_held() {
+    // Handing them out in turn would be a forced swap rather than a decision.
+    let mut game = campaign_run(AttackKind::Basic);
+    let mut saw_both = false;
+    for _ in 0..20 {
+        let held = game.players[0].boons.wall;
+        let Some(offered) = next_campaign_offer(&mut game) else { continue };
+        if held == WallMod::Plain
+            && offered.contains(&OfferItem::Boon(Boon::WallPull))
+            && offered.contains(&OfferItem::Boon(Boon::WallPush))
+        {
+            saw_both = true;
+            break;
+        }
+    }
+    assert!(saw_both, "the two walls never stood together");
+}
+
+#[test]
+fn a_campaign_pool_narrows_but_never_empties() {
+    // Rolled straight rather than played to: a run this far along has already
+    // met its finish, so the only way to look at the pool it would leave behind
+    // is to ask for it.
+    //
+    // It never empties, because whichever wall is not being carried is always
+    // worth swapping to. A lull with an empty box in it would be worse than a
+    // quiet one, and this is why there is never one.
+    let game = new_game();
+    let v = game.viewport;
+    let ground = v.hper(GROUND_Y_PCT);
+    let held = Boons {
+        double_jump: true,
+        dash_free: true,
+        shield: true,
+        wall: WallMod::Pull,
+    };
+    let mut rng = Rng::new(7);
+    let offer = Offer::roll_campaign(
+        &v,
+        0.0,
+        ground,
+        AttackKind::Hammer,
+        AttackKind::Hammer,
+        MAX_LEVEL,
+        held,
+        0,
+        &mut rng,
+    );
+    assert_eq!(offer.count, 1, "one box, since one thing is left");
+    assert_eq!(offer.choices[0].item, OfferItem::Boon(Boon::WallPush));
+}
+
+#[test]
+fn a_fresh_campaign_pool_is_the_weapon_and_every_boon() {
+    // Six things: the weapon to pick up, three boons and two walls. Three of
+    // them stand, so a campaign lull looks exactly like an ordinary one.
+    let game = new_game();
+    let v = game.viewport;
+    let mut rng = Rng::new(11);
+    let offer = Offer::roll_campaign(
+        &v,
+        0.0,
+        v.hper(GROUND_Y_PCT),
+        AttackKind::Hammer,
+        AttackKind::Basic,
+        1,
+        Boons::default(),
+        0,
+        &mut rng,
+    );
+    assert_eq!(offer.count, crate::offer::OFFER_CHOICES, "three boxes, as anywhere else");
+}
+
+/// Runs waves until the campaign ends, and reports the wave it ended on.
+fn play_out_campaign(game: &mut Game) -> i64 {
+    for _ in 0..40 {
+        next_campaign_offer(game);
+        if let Some(result) = game.result {
+            return result.wave;
+        }
+    }
+    panic!("the campaign never ended");
+}
+
+#[test]
+fn a_campaign_ends_one_wave_after_the_weapon_is_mastered() {
+    let mut game = campaign_run(AttackKind::Lunge);
+    let mut mastered_on = None;
+    for _ in 0..40 {
+        next_campaign_offer(&mut game);
+        if mastered_on.is_none() && game.players[0].attack_level >= MAX_LEVEL {
+            // `wave` is already the coming one: the lull sits between them.
+            mastered_on = Some(game.wave);
+        }
+        if let Some(result) = game.result {
+            let mastered = mastered_on.expect("it ended without ever mastering");
+            assert!(result.won(), "reaching the end is the win");
+            assert_eq!(
+                result.wave, mastered,
+                "the run should end on the first wave fought at full level"
+            );
+            assert!(game.settings.mode_record(ModeKind::Campaign, AttackKind::Lunge).cleared);
+            return;
+        }
+    }
+    panic!("the campaign never ended");
+}
+
+#[test]
+fn mastering_the_weapon_is_not_by_itself_the_win() {
+    // One more wave has to be survived, and that wave is a real one.
+    let mut game = campaign_run(AttackKind::Lunge);
+    for _ in 0..40 {
+        next_campaign_offer(&mut game);
+        if game.players[0].attack_level >= MAX_LEVEL {
+            assert!(
+                game.result.is_none(),
+                "the run ended in the very lull that granted the level"
+            );
+            return;
+        }
+    }
+    panic!("the weapon was never mastered");
+}
+
+#[test]
+fn a_plain_campaign_ends_on_carrying_everything_instead() {
+    // `Basic` has no level to reach, so its campaign ends one wave after the
+    // player is carrying every boon a run can carry at once.
+    let mut game = campaign_run(AttackKind::Basic);
+    let wave = play_out_campaign(&mut game);
+    assert!(game.players[0].boons.full(), "it ended before the boons were in");
+    assert!(wave > 1);
+    assert!(game.settings.mode_record(ModeKind::Campaign, AttackKind::Basic).cleared);
+}
+
+#[test]
+fn dying_short_of_mastery_is_not_a_win() {
+    let mut game = campaign_run(AttackKind::Lunge);
+    game.state = State::Playing;
+    for p in game.players.iter_mut() {
+        p.hp = 1.0;
+    }
+    let source = Body::new(0.0, 0.0, 10.0, 10.0);
+    game.damage_player(0, 1000.0, &source, Reach::Normal);
+    let result = game.result.expect("the run should have ended");
+    assert!(!result.won(), "it ended, it was not finished");
+    assert!(!game.settings.mode_record(ModeKind::Campaign, AttackKind::Lunge).cleared);
+}
+
+#[test]
+fn a_campaign_score_stays_out_of_the_endless_table() {
+    // Its pool is narrowed, so its scores are not comparable with a run that
+    // rolled from the whole roster.
+    let mut game = campaign_run(AttackKind::Hammer);
+    game.settings.record_solo = 0;
+    game.players[0].score = 999_999;
+    for p in game.players.iter_mut() {
+        p.hp = 1.0;
+    }
+    let source = Body::new(0.0, 0.0, 10.0, 10.0);
+    game.damage_player(0, 1000.0, &source, Reach::Normal);
+    assert_eq!(game.settings.record_solo, 0, "the endless record was touched");
+    assert_eq!(
+        game.settings.mode_record(ModeKind::Campaign, AttackKind::Hammer).best_score,
+        999_999
+    );
+}
+
+#[test]
+fn a_campaign_record_keeps_the_best_and_not_the_last() {
+    // The point of keeping it is to answer "how far did I get", and a worse
+    // attempt does not un-get the earlier one.
+    let mut settings = Settings::default();
+    settings.record_mode(ModeKind::Campaign, AttackKind::Thin, 17, 5000, false);
+    settings.record_mode(ModeKind::Campaign, AttackKind::Thin, 4, 100, false);
+    let slot = settings.mode_record(ModeKind::Campaign, AttackKind::Thin);
+    assert_eq!(slot.best_wave, 17);
+    assert_eq!(slot.best_score, 5000);
+    assert!(!slot.cleared);
+    settings.record_mode(ModeKind::Campaign, AttackKind::Thin, 21, 200, true);
+    assert!(settings.mode_record(ModeKind::Campaign, AttackKind::Thin).cleared);
+    settings.record_mode(ModeKind::Campaign, AttackKind::Thin, 2, 10, false);
+    assert!(
+        settings.mode_record(ModeKind::Campaign, AttackKind::Thin).cleared,
+        "cleared only ever turns on"
+    );
+}
+
+#[test]
+fn an_ordinary_run_is_untouched_by_any_of_this() {
+    let mut game = new_game();
+    game.start_run(1);
+    assert_eq!(game.mode, RunMode::Endless);
+    settle_on_floor(&mut game);
+    game.players[0].score = crate::offer::OFFER_SCORE_STEP;
+    into_the_lull(&mut game);
+    let offer = game.offer.as_ref().expect("an ordinary lull still offers");
+    assert_eq!(offer.count, 3, "and it still offers three");
+    let kinds: alloc::vec::Vec<AttackKind> = offer
+        .choices
+        .iter()
+        .take(offer.count)
+        .filter_map(|c| match c.item {
+            OfferItem::Attack { kind, .. } => Some(kind),
+            OfferItem::Boon(_) => None,
+        })
+        .collect();
+    assert!(!kinds.is_empty(), "the whole roster is still in the pool");
+}
+
+/* ---------------- the tutorial ---------------- */
+
+#[test]
+fn a_tutorial_is_a_wave_per_level_of_its_weapon() {
+    // Wave one at level one, wave two at two, wave three at three. The weapon
+    // is in hand before the first wave rather than after it: a tutorial that
+    // spent its opening wave on the plain swing would be teaching the thing it
+    // is not about.
+    let mut game = written_run(ModeKind::Tutorial, AttackKind::Hammer);
+    assert_eq!(game.wave, 1);
+    assert_eq!(game.players[0].attack, AttackKind::Hammer);
+    assert_eq!(game.players[0].attack_level, 1, "wave one, level one");
+
+    for level in 2..=MAX_LEVEL {
+        assert_eq!(
+            next_offer_unpaid(&mut game),
+            Some(alloc::vec![OfferItem::Attack {
+                kind: AttackKind::Hammer,
+                level
+            }])
+        );
+        assert_eq!(game.wave, level as i64, "wave {level}");
+        assert_eq!(game.players[0].attack_level, level);
+    }
+    assert_eq!(game.wave, crate::campaign::TUTORIAL_LAST_WAVE);
+}
+
+#[test]
+fn a_tutorial_offers_nothing_but_its_weapon() {
+    // No boons, no walls, no choices. Three waves is a lesson, and a lesson
+    // with a decision in it is teaching two things at once.
+    for weapon in AttackKind::ALL {
+        for step in crate::campaign::tutorial_script(weapon) {
+            assert_eq!(step.len(), 1, "{weapon:?}: a step with a choice in it");
+            assert!(
+                matches!(step[0], OfferItem::Attack { kind, .. } if kind == weapon),
+                "{weapon:?} offered {:?}",
+                step[0]
+            );
+        }
+    }
+}
+
+#[test]
+fn the_plain_tutorial_teaches_two_boons_instead() {
+    // `Basic` has no weapon to be given, so it spends both steps on the two
+    // things the plain swing has to work with.
+    let script = crate::campaign::tutorial_script(AttackKind::Basic);
+    assert_eq!(script.len(), 2);
+    for step in &script {
+        for item in step {
+            assert!(
+                matches!(item, OfferItem::Boon(_)),
+                "the plain tutorial offered {item:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_tutorial_offer_is_not_paid_for() {
+    // Three waves' worth of score does not reach the first threshold, so a
+    // tutorial that charged for its offers would never hand over the weapon it
+    // exists to teach.
+    let mut game = written_run(ModeKind::Tutorial, AttackKind::Tall);
+    for p in game.players.iter_mut() {
+        p.score = 0;
+    }
+    assert!(
+        game.total_score() < OFFER_SCORE_STEP,
+        "the premise: nothing has been earned yet"
+    );
+    into_the_lull(&mut game);
+    assert!(game.offer.is_some(), "the lull should be offering anyway");
+}
+
+#[test]
+fn a_campaign_offer_is_still_paid_for() {
+    // The other half of the rule above: only the tutorial is free.
+    let mut game = campaign_run(AttackKind::Tall);
+    for p in game.players.iter_mut() {
+        p.score = 0;
+    }
+    into_the_lull(&mut game);
+    assert!(game.offer.is_none(), "a campaign offer has to be earned");
+}
+
+#[test]
+fn a_tutorial_runs_plain_waves_whatever_the_roll_says() {
+    // Three waves is not enough room for a variant to be met and understood,
+    // and being handed BLIND on the wave that teaches the weapon would teach
+    // nothing at all. Rolled two hundred times rather than walked through
+    // three: walking three waves would pass on a seed that happened to roll
+    // plain ones, which is most seeds.
+    let mut game = written_run(ModeKind::Tutorial, AttackKind::Lunge);
+    assert_eq!(game.waves.rule, WaveRule::Normal, "the wave in progress");
+    assert_eq!(game.waves.kind, WaveKind::Mixed, "the wave in progress");
+    for wave in 1..=200 {
+        game.waves.begin_wave(wave, &mut game.rng);
+        assert_eq!(game.waves.rule, WaveRule::Normal, "wave {wave}");
+        assert_eq!(game.waves.kind, WaveKind::Mixed, "wave {wave}");
+    }
+}
+
+#[test]
+fn a_campaign_after_a_tutorial_is_not_still_pinned() {
+    // The pins survive `WaveManager::reset` on purpose, so the run that starts
+    // next has to be the one that clears them - or a tutorial would quietly
+    // flatten every campaign played after it in the same session.
+    let mut game = written_run(ModeKind::Tutorial, AttackKind::Lunge);
+    assert!(game.waves.forced_rule.is_some(), "the premise");
+    game.start_written(ModeKind::Campaign, AttackKind::Lunge, 1);
+    assert_eq!(game.waves.forced_rule, None);
+    assert_eq!(game.waves.forced_kind, None);
+    game.start_run(1);
+    assert_eq!(game.waves.forced_rule, None);
+}
+
+#[test]
+fn clearing_the_third_wave_wins_the_tutorial() {
+    let mut game = written_run(ModeKind::Tutorial, AttackKind::Lunge);
+    game.wave = crate::campaign::TUTORIAL_LAST_WAVE;
+    game.spawn_count = wave_budget(game.wave);
+    for _ in 0..600 {
+        game.zombies.clear();
+        game.flyers.clear();
+        game.tick(&idle());
+        if game.result.is_some() {
+            break;
+        }
+    }
+    let result = game.result.expect("the run should have ended");
+    assert!(result.won(), "clearing the last wave is the win");
+    assert_eq!(result.headline(), "TUTORIAL CLEAR");
+    assert!(game.settings.mode_record(ModeKind::Tutorial, AttackKind::Lunge).cleared);
+}
+
+#[test]
+fn a_tutorial_does_not_clear_the_campaign_beside_it() {
+    // Eighteen separate things to finish, and the screen has to be able to say
+    // which. One column filling in must not fill in the other.
+    let mut game = written_run(ModeKind::Tutorial, AttackKind::Lunge);
+    game.wave = crate::campaign::TUTORIAL_LAST_WAVE;
+    game.spawn_count = wave_budget(game.wave);
+    for _ in 0..600 {
+        game.zombies.clear();
+        game.flyers.clear();
+        game.tick(&idle());
+        if game.result.is_some() {
+            break;
+        }
+    }
+    assert!(game.settings.mode_record(ModeKind::Tutorial, AttackKind::Lunge).cleared);
+    assert!(
+        !game.settings.mode_record(ModeKind::Campaign, AttackKind::Lunge).cleared,
+        "the campaign was cleared by its tutorial"
+    );
+}
+
+#[test]
+fn every_tutorial_has_a_lull_for_every_step_it_owes() {
+    // Three waves have two lulls, so a script of more than two steps would end
+    // with something it never got to hand over.
+    for weapon in AttackKind::EVERY {
+        let steps = crate::campaign::tutorial_steps(weapon) as i64;
+        assert_eq!(
+            steps,
+            crate::campaign::TUTORIAL_LAST_WAVE - 1,
+            "{weapon:?}: {steps} steps for {} waves",
+            crate::campaign::TUTORIAL_LAST_WAVE
+        );
+    }
+}
+
+#[test]
+fn the_written_screen_starts_what_it_names() {
+    use crate::menu::MenuAction;
+    // The mode row and the weapon row both feed START. Before the screen had
+    // two rows to move between, `selected_action` read the title menu's index
+    // instead of this screen's - which meant moving the highlight moved
+    // nothing at all.
+    let mut game = new_game();
+    game.state = State::Campaigns;
+    game.campaign_menu.index = 0;
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    assert!(rows[0].label.starts_with("MODE:"));
+    assert!(rows[1].label.starts_with("WEAPON:"));
+
+    // Flip the mode row, then walk down to START and press it.
+    let mut right = idle();
+    right.menu.right = true;
+    game.tick(&right);
+    assert_eq!(game.campaign_mode_choice(), ModeKind::Campaign);
+
+    let start = rows
+        .iter()
+        .position(|r| r.action == MenuAction::StartCampaign)
+        .expect("the screen should offer START");
+    game.campaign_menu.index = start;
+    let weapon = game.campaign_choice();
+    let mut confirm = idle();
+    confirm.menu.confirm = true;
+    game.tick(&confirm);
+    assert_eq!(game.mode, RunMode::Written(ModeKind::Campaign, weapon));
+    assert_eq!(game.state, State::Playing);
+}
+
+#[test]
+fn the_status_line_follows_the_mode_row() {
+    // Nine weapons in two modes are eighteen separate records, and the screen
+    // must show the one it is pointing at.
+    let mut game = new_game();
+    game.state = State::Campaigns;
+    let weapon = game.campaign_choice();
+    game.settings.record_mode(ModeKind::Tutorial, weapon, 3, 400, true);
+    assert_eq!(game.campaign_mode_choice(), ModeKind::Tutorial);
+    assert_eq!(game.campaign_status(), "CLEARED - BEST 400");
+    game.campaign_menu.index = 0;
+    let mut right = idle();
+    right.menu.right = true;
+    game.tick(&right);
+    assert_eq!(game.campaign_mode_choice(), ModeKind::Campaign);
+    assert_eq!(game.campaign_status(), "NOT ATTEMPTED");
+}
+
+#[test]
+fn a_finished_written_run_returns_to_the_screen_it_came_from() {
+    // Where the record it has just written is now on the line under the menu.
+    let mut game = written_run(ModeKind::Tutorial, AttackKind::Lunge);
+    game.wave = crate::campaign::TUTORIAL_LAST_WAVE;
+    game.spawn_count = wave_budget(game.wave);
+    for _ in 0..600 {
+        game.zombies.clear();
+        game.flyers.clear();
+        game.tick(&idle());
+        if game.awaiting_dismiss() {
+            break;
+        }
+    }
+    assert!(game.awaiting_dismiss(), "the result should be waiting");
+    let mut confirm = idle();
+    confirm.menu.confirm = true;
+    game.tick(&confirm);
+    assert_eq!(game.state, State::Campaigns);
+    assert_eq!(game.mode, RunMode::Endless, "the next run is not still written");
+}
+
+#[test]
+fn a_finished_endless_run_still_returns_to_the_title() {
+    let mut game = new_game();
+    game.start_run(1);
+    settle_on_floor(&mut game);
+    for p in game.players.iter_mut() {
+        p.hp = 1.0;
+    }
+    let source = Body::new(0.0, 0.0, 10.0, 10.0);
+    game.damage_player(0, 1000.0, &source, Reach::Normal);
+    for _ in 0..600 {
+        game.tick(&idle());
+        if game.awaiting_dismiss() {
+            break;
+        }
+    }
+    let mut confirm = idle();
+    confirm.menu.confirm = true;
+    game.tick(&confirm);
+    assert_eq!(game.state, State::Title);
 }

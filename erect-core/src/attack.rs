@@ -91,6 +91,40 @@ impl AttackKind {
         AttackKind::Frozen,
     ];
 
+    /// Every kind there is, the plain swing included.
+    ///
+    /// Separate from [`Self::ALL`], which is the *upgrade roster* and leaves
+    /// the plain swing out because it is never offered. This one is the list of
+    /// things a player can be carrying, and it is what a campaign is chosen
+    /// from and what a saved result is filed under - so its order is a stored
+    /// format and must not be shuffled.
+    pub const EVERY: [AttackKind; 9] = [
+        AttackKind::Basic,
+        AttackKind::Hammer,
+        AttackKind::Piercing,
+        AttackKind::Lunge,
+        AttackKind::SingleHit,
+        AttackKind::Thin,
+        AttackKind::Tall,
+        AttackKind::Bullet,
+        AttackKind::Frozen,
+    ];
+
+    /// Where this one sits in [`Self::EVERY`].
+    pub fn index(self) -> usize {
+        match self {
+            AttackKind::Basic => 0,
+            AttackKind::Hammer => 1,
+            AttackKind::Piercing => 2,
+            AttackKind::Lunge => 3,
+            AttackKind::SingleHit => 4,
+            AttackKind::Thin => 5,
+            AttackKind::Tall => 6,
+            AttackKind::Bullet => 7,
+            AttackKind::Frozen => 8,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             AttackKind::Basic => "BASIC",

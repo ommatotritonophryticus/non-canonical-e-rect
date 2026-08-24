@@ -59,6 +59,7 @@ pub unsafe fn render(game: &Game) {
                 render_session(game)
             }
             State::Settings => render_settings(game),
+            State::Campaigns => render_campaigns(game),
             State::DevMenu => render_dev_menu(game),
             State::Title => render_title(game),
         }
@@ -77,7 +78,9 @@ unsafe fn render_result(game: &Game, result: &RunResult) {
         // reads better on a 480x272 panel than a full-screen wash.
         gfx::rect(0.0, v.hper(22.0), v.w, v.hper(52.0), BLACK);
 
-        centered("GAME OVER", 30.0, v.hper(9.0), WHITE, game);
+        // See the desktop renderer.
+        let headline = result.headline();
+        centered(headline, 30.0, v.hper(9.0), WHITE, game);
         centered(&format!("SCORE {}", result.score), 46.0, v.hper(11.0), WHITE, game);
         centered(&format!("WAVE {}", result.wave), 58.0, v.hper(7.0), GREY, game);
         if result.is_record {
@@ -136,6 +139,20 @@ unsafe fn render_settings(game: &Game) {
         centered("SETTINGS", 16.0, v.hper(10.0), WHITE, game);
         render_menu(game, &game.settings_menu);
         centered("LEFT/RIGHT CHANGE   O BACK", 88.0, v.hper(5.0), GREY, game);
+    }
+}
+
+/// See the desktop renderer: eighteen written runs, and the line that says
+/// which are still owed.
+unsafe fn render_campaigns(game: &Game) {
+    unsafe {
+        let v = &game.viewport;
+        let mode = game.campaign_mode_choice();
+        centered(mode.label(), 16.0, v.hper(9.0), WHITE, game);
+        centered(mode.tagline(), 24.0, v.hper(4.5), GREY, game);
+        render_menu(game, &game.campaign_menu);
+        centered(&game.campaign_status(), 78.0, v.hper(5.0), WHITE, game);
+        centered("LEFT/RIGHT CHANGE   O BACK", 88.0, v.hper(4.5), GREY, game);
     }
 }
 
@@ -296,7 +313,7 @@ unsafe fn render_session(game: &Game) {
             let size = readable(v.hper(4.0));
             // Dim until a hit on one counts - see the desktop renderer.
             let face = if offer.armed(game.timer) { WHITE } else { DIM };
-            for choice in offer.choices.iter() {
+            for choice in offer.choices.iter().take(offer.count) {
                 let body = on_screen(&choice.body, cam);
                 actor(&body, face, ow, oh);
                 let label = choice.label(game.players[0].attack);

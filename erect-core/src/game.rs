@@ -12,6 +12,8 @@ use alloc::vec::Vec;
 
 use crate::attack::AttackKind;
 use crate::boon::{WallMod, SHIELD_COOLDOWN_TICKS};
+use crate::attack::MAX_LEVEL;
+use crate::campaign::{self, ModeKind};
 use crate::audio::{AudioEvent, AudioQueue, MusicState, Situation};
 use crate::backdrop::BackdropBlock;
 use crate::color::{EaseColor, Rgb};
@@ -24,12 +26,14 @@ use crate::menu::{Menu, MenuAction, MenuRow};
 use crate::recipe::{Recipe, BROOD_MAX};
 use crate::offer::{Offer, OfferItem, OFFER_SCORE_STEP};
 use crate::settings::{SchemeInfo, Settings, VolumeChannel};
-use crate::waves::{BossKind, FlyerKind, GroundKind, WaveAction, WaveManager, WaveRule};
+use crate::waves::{BossKind, FlyerKind, GroundKind, WaveAction, WaveManager, WaveKind, WaveRule};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum State {
     Title,
     Settings,
+    /// Choosing which weapon to play a campaign for.
+    Campaigns,
     /// Starting parameters for a run, reached by a chord from the title.
     DevMenu,
     Playing,
@@ -42,6 +46,32 @@ pub enum State {
     GameOver,
 }
 
+/// What kind of run this is.
+///
+/// The simulation does not branch on it - waves, enemies and bosses are the
+/// same in all of them. It decides two things only: where an offer's contents
+/// come from, and whether the run can be won.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunMode {
+    /// The ordinary run. Offers are rolled, and it ends when the player does.
+    Endless,
+    /// One weapon, a written list of offers, and a wave that finishes it.
+    /// Which of the two written runs it is decides how long the list and the
+    /// run are; nothing else about them differs.
+    Written(ModeKind, AttackKind),
+}
+
+impl RunMode {
+    /// The mode and weapon, when this run has a script; `None` when it is the
+    /// endless one, which has neither.
+    pub fn written(self) -> Option<(ModeKind, AttackKind)> {
+        match self {
+            RunMode::Written(kind, weapon) => Some((kind, weapon)),
+            RunMode::Endless => None,
+        }
+    }
+}
+
 /// What the run came to, kept for the result screen after the run itself has
 /// been torn down.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +80,28 @@ pub struct RunResult {
     pub wave: i64,
     pub players: usize,
     pub is_record: bool,
+    /// Set when the run was finished rather than ended, to which of the two
+    /// written modes was finished. Only a written run can be; an endless one
+    /// has nothing to reach.
+    pub cleared: Option<ModeKind>,
+}
+
+impl RunResult {
+    /// True when the run was finished rather than ended.
+    pub fn won(&self) -> bool {
+        self.cleared.is_some()
+    }
+
+    /// What the result screen leads with. Here rather than in each renderer so
+    /// the two frontends cannot disagree about what just happened; the casing
+    /// is theirs to choose.
+    pub fn headline(&self) -> &'static str {
+        match self.cleared {
+            Some(ModeKind::Tutorial) => "TUTORIAL CLEAR",
+            Some(ModeKind::Campaign) => "CAMPAIGN CLEAR",
+            None => "GAME OVER",
+        }
+    }
 }
 
 pub struct Game {
@@ -78,6 +130,17 @@ pub struct Game {
     /// The three things standing in the lull waiting to be hit. `None` outside
     /// an offer, which is most of the time.
     pub offer: Option<Offer>,
+    /// What kind of run is in progress.
+    pub mode: RunMode,
+    /// Which weapon the campaign screen is showing.
+    pub campaign_pick: usize,
+    /// Which of the two written modes the campaign screen is showing.
+    pub campaign_mode: usize,
+    /// How far through its script a tutorial has got. Counted in offers given,
+    /// not in offers taken: declining one by starting the wave early spends it,
+    /// the same as it spends a rolled one. A campaign has no script and never
+    /// touches this.
+    pub campaign_step: usize,
     pub popups: Vec<ScorePopup>,
     /// Sound cues raised this tick; the frontend drains them after `tick`.
     pub audio: AudioQueue,
@@ -101,6 +164,7 @@ pub struct Game {
     pub waves: WaveManager,
     pub title_menu: Menu,
     pub settings_menu: Menu,
+    pub campaign_menu: Menu,
     pub pause_menu: Menu,
     pub confirm_menu: Menu,
     pub dev_menu: Menu,
@@ -199,6 +263,10 @@ impl Game {
             bullets: Vec::new(),
             traps: Vec::new(),
             offer: None,
+            mode: RunMode::Endless,
+            campaign_pick: 0,
+            campaign_mode: 0,
+            campaign_step: 0,
             popups: Vec::new(),
             audio: AudioQueue::default(),
             aim_dots: Vec::new(),
@@ -210,8 +278,14 @@ impl Game {
             wave: 1,
             spawn_count: 0,
             waves: WaveManager::default(),
-            title_menu: Menu::new(42.0),
+            // Five rows now, and the record lines sit at 76 and 82. At the
+            // ordinary pitch the fifth would land on top of them; tightened and
+            // started higher, all seven lines share the screen.
+            title_menu: Menu::tight(38.0, 8.0),
             settings_menu: Menu::new(26.0),
+            // Four rows at the ordinary pitch would put the last one on top of
+            // the status line, which is the one thing this screen is for.
+            campaign_menu: Menu::tight(44.0, 8.0),
             pause_menu: Menu::new(48.0),
             confirm_menu: Menu::new(52.0),
             // Nine rows, so a tighter pitch than the rest.
@@ -386,6 +460,7 @@ impl Game {
         self.traps.clear();
         self.offer = None;
         self.next_offer_score = OFFER_SCORE_STEP;
+        self.campaign_step = 0;
         self.popups.clear();
         self.elite_notice = None;
         self.timer = 0;
@@ -448,7 +523,64 @@ impl Game {
         // An ordinary run never inherits the developer menu's pins.
         self.waves.forced_kind = None;
         self.waves.forced_rule = None;
+        self.mode = RunMode::Endless;
         self.state = State::Playing;
+    }
+
+    /// True when this wave, now cleared, was the one that finished the run.
+    ///
+    /// A tutorial ends on a number, because it is three waves by construction.
+    /// A campaign ends one wave after its weapon reaches its last level - and
+    /// "one wave after" falls out of where this is called from rather than
+    /// being counted: the offer that could grant that level is created further
+    /// down this same function, so the earliest clear that can see the level is
+    /// the next one.
+    ///
+    /// A `Basic` campaign has no level to reach, so it ends one wave after the
+    /// player is carrying every boon a run can carry at once. Same shape: the
+    /// pool has nothing left to give, and then one more wave.
+    fn written_run_finished(&self, kind: ModeKind, weapon: AttackKind) -> bool {
+        match kind {
+            ModeKind::Tutorial => self.wave >= campaign::TUTORIAL_LAST_WAVE,
+            ModeKind::Campaign => self.players.iter().any(|p| {
+                if weapon == AttackKind::Basic {
+                    p.boons.full()
+                } else {
+                    p.attack == weapon && p.attack_level >= MAX_LEVEL
+                }
+            }),
+        }
+    }
+
+    /// Starts a written run - a tutorial or a campaign - for one weapon.
+    ///
+    /// The weapon is not handed over here - the script's first step offers it,
+    /// so the run opens on the plain swing exactly as any other does and the
+    /// first lull is where it changes. `Basic` has no such step and keeps the
+    /// plain swing, and its combo finisher, for the whole run.
+    ///
+    /// A tutorial also pins the wave modifiers off. Three waves is not enough
+    /// room for a variant to be met and understood, and being handed BLIND on
+    /// the wave that teaches the weapon would teach nothing at all.
+    pub fn start_written(&mut self, kind: ModeKind, weapon: AttackKind, player_count: usize) {
+        self.start_run(player_count);
+        self.mode = RunMode::Written(kind, weapon);
+        self.campaign_step = 0;
+        if kind == ModeKind::Tutorial {
+            self.waves.forced_kind = Some(WaveKind::Mixed);
+            self.waves.forced_rule = Some(WaveRule::Normal);
+            // The first wave was rolled by `start_run`, before the pins were
+            // set. Roll it again now that they are.
+            self.waves.begin_wave(self.wave, &mut self.rng);
+            // A wave a level: the first is fought with the weapon already in
+            // hand, and the two lulls raise it the rest of the way.
+            if let Some(weapon) = campaign::tutorial_start(weapon) {
+                for p in self.players.iter_mut() {
+                    p.attack = weapon;
+                    p.attack_level = 1;
+                }
+            }
+        }
     }
 
     pub fn toggle_pause(&mut self) {
@@ -463,6 +595,16 @@ impl Game {
     }
 
     fn on_wave_cleared(&mut self) {
+        // Clearing the last wave of a campaign is the win, and clearing is
+        // exactly what this hook means: the wave's budget spent and nothing
+        // left standing. Checked before the number moves on, or the wave that
+        // was won would already be the next one.
+        if let Some((kind, weapon)) = self.mode.written() {
+            if self.written_run_finished(kind, weapon) {
+                self.end_run(true);
+                return;
+            }
+        }
         self.wave += 1;
         self.spawn_count = 0;
         self.background.set_target(BG_CALM);
@@ -496,17 +638,34 @@ impl Game {
     }
 
     fn game_over(&mut self) {
+        self.end_run(false);
+    }
+
+    /// The run is over, one way or the other.
+    ///
+    /// `won` is the difference between reaching the end of a campaign and
+    /// reaching the end of the player. Both stop the same way and show the same
+    /// screen; only what it says differs, and only a campaign can win.
+    fn end_run(&mut self, won: bool) {
         let team_score = self.total_score();
         let count = self.players.len();
-        let is_record = team_score > self.settings.record(count);
+        // The endless run's record is the score, and a campaign has no business
+        // in that table: its upgrades are written down, so its scores are not
+        // comparable with a run that rolled its own.
+        let is_record = self.mode == RunMode::Endless
+            && team_score > self.settings.record(count);
         if is_record {
             self.settings.set_record(count, team_score);
+        }
+        if let Some((kind, weapon)) = self.mode.written() {
+            self.settings.record_mode(kind, weapon, self.wave, team_score, won);
         }
         self.result = Some(RunResult {
             score: team_score,
             wave: self.wave,
             players: count,
             is_record,
+            cleared: won.then(|| self.mode.written().map(|(kind, _)| kind)).flatten(),
         });
         self.result_ticks = GAME_OVER_TICKS;
         self.state = State::GameOver;
@@ -521,9 +680,20 @@ impl Game {
     /// Leaves the result screen once the player dismisses it.
     fn finish_game_over(&mut self) {
         let count = self.players.len();
+        // A written run goes back to the screen it was chosen from, where the
+        // record it has just written is now on the line under the menu - so
+        // finishing one shows what finishing it did. The endless run has no
+        // such screen and goes to the title.
+        let written = self.mode.written().is_some();
         self.result = None;
-        self.state = State::Title;
-        self.title_menu.index = 0;
+        self.mode = RunMode::Endless;
+        if written {
+            self.state = State::Campaigns;
+            self.campaign_menu.index = 0;
+        } else {
+            self.state = State::Title;
+            self.title_menu.index = 0;
+        }
         self.start_new_run(count);
     }
 
@@ -635,24 +805,71 @@ impl Game {
         }
     }
 
-    /// Stands three options up in the lull, if the team has earned one.
+    /// Stands the options up in the lull, if the team has earned one.
     ///
     /// Both players share it and either can take it: the trigger is the team
     /// total, which is the same number that drives how fast enemies chase, so
     /// what the run buys and what it faces keep step.
+    ///
+    /// A tutorial is the exception. Three waves' worth of score does not reach
+    /// the first threshold, so paying for its offers would mean never being
+    /// given the weapon the tutorial exists to teach; there, every lull is an
+    /// offer and the waves do the pacing instead.
     fn maybe_offer(&mut self) {
-        if self.total_score() < self.next_offer_score || self.players.is_empty() {
+        if self.players.is_empty() {
             return;
         }
-        self.next_offer_score += OFFER_SCORE_STEP;
+        let written = self.mode.written();
+        let by_wave = matches!(written, Some((ModeKind::Tutorial, _)));
+        if !by_wave {
+            if self.total_score() < self.next_offer_score {
+                return;
+            }
+            self.next_offer_score += OFFER_SCORE_STEP;
+        }
         let v = self.viewport;
         let ground = v.hper(GROUND_Y_PCT);
         let camera = self.camera_x;
+        let timer = self.timer;
+
+        if let Some((ModeKind::Tutorial, weapon)) = written {
+            // The step is spent whether or not it had anything in it, so a
+            // tutorial's offers keep pace with its waves rather than bunching
+            // up at the end.
+            let script = campaign::tutorial_script(weapon);
+            let step = script.get(self.campaign_step).cloned();
+            self.campaign_step += 1;
+            // Past the end of the script there is nothing to stand there. A
+            // lull with an empty box in it would be worse than a quiet one.
+            self.offer = step
+                .filter(|items| !items.is_empty())
+                .map(|items| Offer::scripted(&v, camera, ground, items.as_slice(), timer));
+            return;
+        }
+
         let (kind, level) = (self.players[0].attack, self.players[0].attack_level);
         // What is already held comes off the table. Boons are one-time, so
         // offering one twice would be offering nothing.
         let held = self.players[0].boons;
-        let timer = self.timer;
+
+        if let Some((ModeKind::Campaign, weapon)) = written {
+            // A real roll, only without the roster: the weapon's next step and
+            // whatever boons are still outstanding. What the campaign takes
+            // away is the option to become a different run, not the choosing.
+            self.offer = Some(Offer::roll_campaign(
+                &v,
+                camera,
+                ground,
+                weapon,
+                kind,
+                level,
+                held,
+                timer,
+                &mut self.offer_rng,
+            ));
+            return;
+        }
+
         self.offer = Some(Offer::roll(
             &v,
             camera,
@@ -709,9 +926,13 @@ impl Game {
         if !offer.armed(self.timer) {
             return;
         }
+        // Only the ones actually standing. A scripted lull can have fewer, and
+        // the rest of the array is a leftover shape at the origin - hittable
+        // from the far left of the field if it were ever looked at.
+        let count = offer.count;
         let bodies: [Body; crate::offer::OFFER_CHOICES] =
             core::array::from_fn(|i| offer.choices[i].body);
-        for (i, body) in bodies.iter().enumerate() {
+        for (i, body) in bodies.iter().take(count).enumerate() {
             if self.find_attacker(body).is_some() {
                 self.take_offer(i);
                 return;
@@ -931,7 +1152,7 @@ impl Game {
         // tick rather than at every transition into and out of a menu, because
         // there are six such transitions and only one of them is obvious.
         match self.state {
-            State::Title | State::Settings | State::DevMenu => {
+            State::Title | State::Settings | State::Campaigns | State::DevMenu => {
                 self.background.set_target(BG_MENU)
             }
             _ if matches!(
@@ -948,7 +1169,7 @@ impl Game {
         self.background.approach(10.0);
 
         match self.state {
-            State::Title | State::Settings | State::DevMenu => {
+            State::Title | State::Settings | State::Campaigns | State::DevMenu => {
                 // A chord from the title, and only from the title: it must not
                 // be reachable from inside settings or a paused run.
                 if input.dev_menu && self.state == State::Title {
@@ -1060,6 +1281,28 @@ impl Game {
             State::ConfirmAbandon => vec![
                 MenuRow { label: "NO".to_string(), action: MenuAction::KeepPlaying, swatch: None },
                 MenuRow { label: "YES".to_string(), action: MenuAction::AbandonRun, swatch: None },
+            ],
+            State::Campaigns => vec![
+                MenuRow {
+                    label: format!("MODE: {}", self.campaign_mode_choice().label()),
+                    action: MenuAction::AdjustCampaignMode,
+                    swatch: None,
+                },
+                MenuRow {
+                    label: format!("WEAPON: {}", self.campaign_choice().label()),
+                    action: MenuAction::AdjustCampaignWeapon,
+                    swatch: None,
+                },
+                MenuRow {
+                    label: "START".to_string(),
+                    action: MenuAction::StartCampaign,
+                    swatch: None,
+                },
+                MenuRow {
+                    label: "BACK".to_string(),
+                    action: MenuAction::Back,
+                    swatch: None,
+                },
             ],
             State::DevMenu => vec![
                 MenuRow {
@@ -1195,6 +1438,14 @@ impl Game {
                         swatch: None,
                     });
                 }
+                // Not "CAMPAIGN": the screen behind this row holds the
+                // tutorials too, and it opens on them. What both have in
+                // common is that they are runs played for one weapon.
+                rows.push(MenuRow {
+                    label: "WEAPON RUNS".to_string(),
+                    action: MenuAction::OpenCampaigns,
+                    swatch: None,
+                });
                 rows.push(MenuRow {
                     label: "SETTINGS".to_string(),
                     action: MenuAction::OpenSettings,
@@ -1210,9 +1461,35 @@ impl Game {
         }
     }
 
+    /// The weapon the campaign screen is showing.
+    pub fn campaign_choice(&self) -> AttackKind {
+        AttackKind::EVERY[self.campaign_pick.min(AttackKind::EVERY.len() - 1)]
+    }
+
+    /// The mode the campaign screen is showing.
+    pub fn campaign_mode_choice(&self) -> ModeKind {
+        ModeKind::EVERY[self.campaign_mode.min(ModeKind::EVERY.len() - 1)]
+    }
+
+    /// How the campaign screen describes what has been done with this weapon
+    /// in this mode. Nine weapons times two modes are eighteen separate things
+    /// to finish, and the only way to know which is still owed is to be told.
+    pub fn campaign_status(&self) -> String {
+        let weapon = self.campaign_choice();
+        let done = self.settings.mode_record(self.campaign_mode_choice(), weapon);
+        if done.cleared {
+            format!("CLEARED - BEST {}", done.best_score)
+        } else if done.best_wave > 0 {
+            format!("REACHED WAVE {}", done.best_wave)
+        } else {
+            "NOT ATTEMPTED".to_string()
+        }
+    }
+
     fn current_menu_mut(&mut self) -> &mut Menu {
         match self.state {
             State::Settings => &mut self.settings_menu,
+            State::Campaigns => &mut self.campaign_menu,
             State::DevMenu => &mut self.dev_menu,
             State::Paused => &mut self.pause_menu,
             State::ConfirmAbandon => &mut self.confirm_menu,
@@ -1228,6 +1505,7 @@ impl Game {
     fn selected_action(&self) -> Option<MenuAction> {
         let menu = match self.state {
             State::Settings => &self.settings_menu,
+            State::Campaigns => &self.campaign_menu,
             State::DevMenu => &self.dev_menu,
             State::Paused => &self.pause_menu,
             State::ConfirmAbandon => &self.confirm_menu,
@@ -1256,6 +1534,16 @@ impl Game {
             Some(MenuAction::AdjustDevDashFree) => self.dev.toggle_dash_free(),
             Some(MenuAction::AdjustDevShield) => self.dev.toggle_shield(),
             Some(MenuAction::AdjustDevWall) => self.dev.cycle_wall(dir),
+            Some(MenuAction::AdjustCampaignWeapon) => {
+                let n = AttackKind::EVERY.len() as i32;
+                self.campaign_pick =
+                    ((self.campaign_pick as i32 + dir).rem_euclid(n)) as usize;
+            }
+            Some(MenuAction::AdjustCampaignMode) => {
+                let n = ModeKind::EVERY.len() as i32;
+                self.campaign_mode =
+                    ((self.campaign_mode as i32 + dir).rem_euclid(n)) as usize;
+            }
             _ => {}
         }
     }
@@ -1287,6 +1575,22 @@ impl Game {
             Some(MenuAction::AdjustDevDashFree) => self.dev.toggle_dash_free(),
             Some(MenuAction::AdjustDevShield) => self.dev.toggle_shield(),
             Some(MenuAction::AdjustDevWall) => self.dev.cycle_wall(1),
+            Some(MenuAction::AdjustCampaignWeapon) => {
+                let n = AttackKind::EVERY.len() as i32;
+                self.campaign_pick = ((self.campaign_pick as i32 + 1).rem_euclid(n)) as usize;
+            }
+            Some(MenuAction::AdjustCampaignMode) => {
+                let n = ModeKind::EVERY.len() as i32;
+                self.campaign_mode = ((self.campaign_mode as i32 + 1).rem_euclid(n)) as usize;
+            }
+            Some(MenuAction::OpenCampaigns) => {
+                self.state = State::Campaigns;
+                self.campaign_menu.index = 0;
+            }
+            Some(MenuAction::StartCampaign) => {
+                let (kind, weapon) = (self.campaign_mode_choice(), self.campaign_choice());
+                self.start_written(kind, weapon, 1);
+            }
             Some(MenuAction::StartDevRun) => self.start_dev_run(),
             Some(MenuAction::Quit) => self.quit_requested = true,
             Some(MenuAction::Resume) => self.toggle_pause(),

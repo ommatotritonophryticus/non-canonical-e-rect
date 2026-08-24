@@ -172,6 +172,11 @@ a pinned image, so the reproducibility the container buys is already paid for.
 The tests run first and everything else depends on them, so a red suite
 publishes nothing.
 
+Re-running it on a tag that already has a release replaces that release's files
+rather than refusing. A re-run is the ordinary way to recover from a job that
+failed for a reason nothing to do with the build, and a publish step that only
+knows how to create turns every retry into "go and delete the release first".
+
 ### What has to be set up in GitHub
 
 Almost nothing. In order:

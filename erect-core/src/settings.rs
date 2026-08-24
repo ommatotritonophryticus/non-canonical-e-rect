@@ -4,6 +4,8 @@
 //! PSP writes bytes to the Memory Stick. The core only tracks the values and
 //! raises [`Settings::dirty`] when a frontend should persist them.
 
+use crate::attack::AttackKind;
+use crate::campaign::ModeKind;
 use crate::config::{MAX_PLAYERS, PLAYER_COLORS};
 
 /// One control scheme a platform offers. Supplied by the frontend, because the
@@ -23,6 +25,17 @@ pub struct PlayerConfig {
     pub color_index: usize,
 }
 
+/// How one mode for one weapon has gone across every attempt.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ModeRecord {
+    /// Set once and never cleared: the thing was finished at least once.
+    pub cleared: bool,
+    /// The furthest wave reached, which is what answers "where did it end last
+    /// time" better than a score does.
+    pub best_wave: i64,
+    pub best_score: i64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub players: [PlayerConfig; MAX_PLAYERS],
@@ -39,6 +52,10 @@ pub struct Settings {
     pub launches: u64,
     /// Set whenever something changed; the frontend clears it after saving.
     pub dirty: bool,
+    /// How each weapon's tutorial has gone, filed by [`AttackKind::index`].
+    pub tutorial: [ModeRecord; AttackKind::EVERY.len()],
+    /// How each weapon's campaign has gone, filed by [`AttackKind::index`].
+    pub campaign: [ModeRecord; AttackKind::EVERY.len()],
 }
 
 /// Which of the two volume rows is being adjusted.
@@ -70,6 +87,8 @@ impl Default for Settings {
             sfx_volume: VOLUME_MAX,
             launches: 0,
             dirty: false,
+            tutorial: [ModeRecord::default(); AttackKind::EVERY.len()],
+            campaign: [ModeRecord::default(); AttackKind::EVERY.len()],
         }
     }
 }
@@ -132,6 +151,46 @@ impl Settings {
             VolumeChannel::Sfx => self.sfx_volume = stepped,
         }
         self.dirty = true;
+    }
+
+    /// What one written run for one weapon came to, best of every attempt.
+    pub fn mode_record(&self, kind: ModeKind, weapon: AttackKind) -> ModeRecord {
+        self.table(kind)[weapon.index()]
+    }
+
+    /// Files the result of one attempt.
+    ///
+    /// Best of, not last of: the point of keeping it is to answer "how far did
+    /// I get", and a worse attempt does not un-get the earlier one. `cleared`
+    /// only ever turns on.
+    pub fn record_mode(
+        &mut self,
+        kind: ModeKind,
+        weapon: AttackKind,
+        wave: i64,
+        score: i64,
+        won: bool,
+    ) {
+        let index = weapon.index();
+        let slot = &mut self.table_mut(kind)[index];
+        slot.best_wave = slot.best_wave.max(wave);
+        slot.best_score = slot.best_score.max(score);
+        slot.cleared |= won;
+        self.dirty = true;
+    }
+
+    fn table(&self, kind: ModeKind) -> &[ModeRecord; AttackKind::EVERY.len()] {
+        match kind {
+            ModeKind::Tutorial => &self.tutorial,
+            ModeKind::Campaign => &self.campaign,
+        }
+    }
+
+    fn table_mut(&mut self, kind: ModeKind) -> &mut [ModeRecord; AttackKind::EVERY.len()] {
+        match kind {
+            ModeKind::Tutorial => &mut self.tutorial,
+            ModeKind::Campaign => &mut self.campaign,
+        }
     }
 
     pub fn record(&self, player_count: usize) -> i64 {

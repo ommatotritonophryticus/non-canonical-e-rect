@@ -193,6 +193,17 @@ jobs:
           files=$(find artifacts -type f | sort)
           test -n "$files" || { echo "nothing was built"; exit 1; }
           echo "$files"
-          gh release create "${GITHUB_REF_NAME}" $files \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+          # Creating and updating are different commands, and which one is
+          # wanted depends on something only the server knows. A re-run is the
+          # normal way to recover from a job that failed for a reason nothing to
+          # do with the build - a runner that lost the network, a cache that
+          # came back wrong - and a release step that refuses the second attempt
+          # turns a retry into "delete the release by hand first".
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "release ${GITHUB_REF_NAME} exists; replacing its files"
+            gh release upload "${GITHUB_REF_NAME}" $files --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" $files \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi

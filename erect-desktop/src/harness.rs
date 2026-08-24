@@ -77,6 +77,8 @@ impl Harness {
         let mut fight = false;
         let mut boons = false;
         let mut screen: Option<String> = None;
+        let mut written: Option<(erect_core::campaign::ModeKind, erect_core::attack::AttackKind)> =
+            None;
         let mut wall = erect_core::boon::WallMod::Plain;
         for part in spec.split(',') {
             let (key, value) = part.split_once('=').unwrap_or((part, ""));
@@ -89,6 +91,24 @@ impl Harness {
                         _ => None,
                     }
                 }
+                // `written=tutorial:hammer` - a real written run rather than a
+                // dev one, so the mode can be watched from the outside as it
+                // is actually played.
+                "written" => {
+                    if let Some((mode, weapon)) = value.split_once(':') {
+                        let kind = match mode {
+                            "campaign" => erect_core::campaign::ModeKind::Campaign,
+                            _ => erect_core::campaign::ModeKind::Tutorial,
+                        };
+                        let weapon = erect_core::attack::AttackKind::EVERY
+                            .iter()
+                            .copied()
+                            .find(|k| k.label().eq_ignore_ascii_case(weapon))
+                            .unwrap_or(erect_core::attack::AttackKind::Basic);
+                        written = Some((kind, weapon));
+                    }
+                }
+                "level" => dev.attack_level = value.parse().unwrap_or(1),
                 "frames" => frames = value.parse().unwrap_or(600),
                 "out" => shots.push((frames, value.to_string())),
                 // A second and later snapshot, so one run can show a thing
@@ -136,7 +156,35 @@ impl Harness {
         match screen.as_deref() {
             Some("dev") => game.state = erect_core::game::State::DevMenu,
             Some("title") => game.state = erect_core::game::State::Title,
-            _ => game.start_dev_run(),
+            // `campaigns` opens on the tutorial, `campaigns2` on the campaign:
+            // the screen changes its heading with the mode, so both halves of
+            // it have to be capturable.
+            Some("campaigns") => game.state = erect_core::game::State::Campaigns,
+            Some("campaigns2") => {
+                game.state = erect_core::game::State::Campaigns;
+                game.campaign_mode = 1;
+            }
+            _ => match written {
+                Some((kind, weapon)) => {
+                    game.start_written(kind, weapon, 1);
+                    // `score=` still applies, so a campaign lull can be reached
+                    // without playing the twenty minutes it would cost to earn
+                    // the first one.
+                    if let Some(p) = game.players.first_mut() {
+                        p.score = dev.score;
+                    }
+                    // And `level=` seeds the weapon, so the end of a campaign
+                    // can be photographed without earning every offer between
+                    // here and there.
+                    if dev.attack_level > 1 {
+                        for p in game.players.iter_mut() {
+                            p.attack = weapon;
+                            p.attack_level = dev.attack_level;
+                        }
+                    }
+                }
+                None => game.start_dev_run(),
+            },
         }
         shots.sort_by_key(|(at, _)| *at);
         if boons || wall != erect_core::boon::WallMod::Plain {

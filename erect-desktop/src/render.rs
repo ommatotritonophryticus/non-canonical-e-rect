@@ -262,6 +262,7 @@ impl Renderer {
                 self.render_session(game)
             }
             State::Settings => self.render_settings(game, pads_connected),
+            State::Campaigns => self.render_campaigns(game, pads_connected),
             State::DevMenu => self.render_dev_menu(game, pads_connected),
             State::Title => self.render_title(game, pads_connected),
         }
@@ -337,6 +338,23 @@ impl Renderer {
         let size = v.hper(3.5);
         self.draw_centered(v, "LEFT / RIGHT TO CHANGE", 78.0, size, hint);
         self.draw_centered(v, "ESC OR B TO GO BACK", 83.0, size, hint);
+    }
+
+    /// Choosing which weapon, and which of the two written runs, to spend.
+    ///
+    /// The line under the menu is the reason the screen exists: nine weapons in
+    /// two modes are eighteen separate things to finish, and the only way to
+    /// know which is still owed is to be told. The heading follows the chosen
+    /// mode, so the screen names what START will actually begin.
+    fn render_campaigns(&self, game: &Game, pads_connected: [bool; MAX_PLAYERS]) {
+        let v = &game.viewport;
+        let mode = game.campaign_mode_choice();
+        self.draw_centered_shadowed(v, mode.label(), 18.0, v.hper(9.0), WHITE);
+        self.draw_centered(v, mode.tagline(), 26.0, v.hper(4.0), GREY_TEXT);
+        self.render_menu(game, &game.campaign_menu, pads_connected);
+        self.draw_centered(v, &game.campaign_status(), 76.0, v.hper(4.5), WHITE);
+        let hint = v.hper(3.5);
+        self.draw_centered(v, "LEFT / RIGHT CHANGE", 82.0, hint, GREY_TEXT);
     }
 
     fn render_dev_menu(&self, game: &Game, pads_connected: [bool; MAX_PLAYERS]) {
@@ -443,7 +461,7 @@ impl Renderer {
             // choice they did not make.
             let armed = offer.armed(game.timer);
             let face = if armed { WHITE } else { OFFER_INERT };
-            for choice in offer.choices.iter() {
+            for choice in offer.choices.iter().take(offer.count) {
                 let body = on_screen(&choice.body, cam);
                 self.draw_actor(v, &body, face);
                 let label = choice.label(game.players[0].attack);
@@ -565,7 +583,11 @@ impl Renderer {
         // Dim the scene so the numbers read against it.
         draw_rectangle(0.0, 0.0, v.w, v.h, Color::new(0.0, 0.0, 0.0, 0.6));
 
-        self.draw_centered_shadowed(v, "game over", 30.0, v.hper(11.0), WHITE);
+        // A written run can be finished rather than merely ended, and the
+        // screen has to say which. Everything below it is the same either way:
+        // the score and the wave are what happened, however it stopped.
+        let headline = result.headline().to_lowercase();
+        self.draw_centered_shadowed(v, &headline, 30.0, v.hper(11.0), WHITE);
         self.draw_centered_shadowed(
             v,
             &format!("score {}", result.score),

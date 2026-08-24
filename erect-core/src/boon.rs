@@ -101,6 +101,15 @@ impl Boons {
         }
     }
 
+    /// True when this run is carrying everything a run can carry at once.
+    ///
+    /// Not a fold over [`Boon::ALL`]: the two walls are one setting, so a run
+    /// holding a wall is holding all the wall it can, and asking for both would
+    /// be asking for something that cannot exist.
+    pub fn full(&self) -> bool {
+        self.double_jump && self.dash_free && self.shield && self.wall != WallMod::Plain
+    }
+
     pub fn take(&mut self, boon: Boon) {
         match boon {
             Boon::DoubleJump => self.double_jump = true,

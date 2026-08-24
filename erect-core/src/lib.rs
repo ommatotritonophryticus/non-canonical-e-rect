@@ -22,6 +22,7 @@ pub mod attack;
 pub mod audio;
 pub mod backdrop;
 pub mod boon;
+pub mod campaign;
 pub mod color;
 pub mod config;
 pub mod dev;

@@ -32,7 +32,18 @@ pub const OFFER_ARM_TICKS: i64 = 90;
 
 /// Where they stand, as a percentage of the view. Spread wide enough that
 /// reaching one is a decision rather than an accident of where you stopped.
-const OFFER_X_PCT: [f32; OFFER_CHOICES] = [25.0, 50.0, 75.0];
+///
+/// Three is what a rolled offer always has; a scripted one can have fewer, and
+/// then they spread to fill the same width rather than huddling at the left.
+/// One stands in the middle, where the player is.
+fn spread(count: usize) -> &'static [f32] {
+    match count {
+        0 => &[],
+        1 => &[50.0],
+        2 => &[33.0, 67.0],
+        _ => &[25.0, 50.0, 75.0],
+    }
+}
 
 /// What one of the three standing options would give.
 ///
@@ -98,7 +109,12 @@ impl OfferChoice {
 }
 
 pub struct Offer {
+    /// Only the first [`Self::count`] are standing. The array is fixed so the
+    /// core stays free of an allocation per lull on a console with 32 MB.
     pub choices: [OfferChoice; OFFER_CHOICES],
+    /// How many of them there actually are. A rolled offer always has three; a
+    /// scripted one has as many as its step wrote down.
+    pub count: usize,
     /// First tick on which a hit counts. A deadline rather than a countdown,
     /// for the same reason the dash uses one: the offer is created partway
     /// through a tick that has already run some of its work.
@@ -109,6 +125,49 @@ impl Offer {
     /// True once hitting an option means taking it.
     pub fn armed(&self, timer: i64) -> bool {
         timer >= self.live_from
+    }
+
+    /// Stands exactly what it is given, in the order it is given.
+    ///
+    /// No pool, no draw, no filtering by what is already held: a script has
+    /// already decided all of that. Anything past the third is dropped rather
+    /// than queued - three is what the lull has room for.
+    pub fn scripted(
+        v: &Viewport,
+        camera_x: f32,
+        ground_y: f32,
+        items: &[OfferItem],
+        timer: i64,
+    ) -> Self {
+        let count = items.len().min(OFFER_CHOICES);
+        let mut offer = Self::empty(timer);
+        offer.count = count;
+        for (i, item) in items.iter().take(count).enumerate() {
+            offer.choices[i] = OfferChoice {
+                item: *item,
+                body: Self::stand(v, camera_x, ground_y, count, i),
+            };
+        }
+        offer
+    }
+
+    /// Where the `i`th of `count` boxes stands.
+    fn stand(v: &Viewport, camera_x: f32, ground_y: f32, count: usize, i: usize) -> Body {
+        let w = v.wper(5.0);
+        let h = v.hper(10.0);
+        let at = spread(count).get(i).copied().unwrap_or(50.0);
+        Body::new(camera_x + v.wper(at) - w / 2.0, ground_y - h, w, h)
+    }
+
+    fn empty(timer: i64) -> Self {
+        Self {
+            choices: [OfferChoice {
+                item: OfferItem::Attack { kind: AttackKind::Basic, level: 1 },
+                body: Body::default(),
+            }; OFFER_CHOICES],
+            count: 0,
+            live_from: timer + OFFER_ARM_TICKS,
+        }
     }
 
     /// Draws three distinct options for a player carrying `current` at `level`
@@ -129,29 +188,46 @@ impl Offer {
         timer: i64,
         rng: &mut Rng,
     ) -> Self {
-        // At most the whole roster, the level-up and every boon, so a fixed
-        // array does.
-        let mut pool =
-            [OfferItem::Attack { kind: AttackKind::Basic, level: 1 };
-                AttackKind::ALL.len() + 1 + Boon::ALL.len()];
-        let mut n = 0;
-        if current != AttackKind::Basic && level < MAX_LEVEL {
-            pool[n] = OfferItem::Attack { kind: current, level: level + 1 };
-            n += 1;
-        }
-        for kind in AttackKind::ALL {
-            if kind != current {
-                pool[n] = OfferItem::Attack { kind, level: 1 };
-                n += 1;
-            }
-        }
-        for boon in Boon::ALL {
-            if !held.has(boon) {
-                pool[n] = OfferItem::Boon(boon);
-                n += 1;
-            }
-        }
+        let (pool, n) = build_pool(current, level, held, None);
+        Self::draw(v, camera_x, ground_y, pool, n, timer, rng)
+    }
 
+    /// The same draw with the roster taken out of it: `weapon` and no other.
+    ///
+    /// This is the whole mechanical difference between a campaign and an
+    /// ordinary run. The pool is the chosen weapon's next step and every boon
+    /// not yet held, so a campaign still has real choices in it - just never
+    /// the choice to become a different run.
+    ///
+    /// Once the weapon is at its last level the pool is boons alone, and once
+    /// those run down it can be a single box. That is why the count is derived
+    /// rather than fixed at three.
+    #[allow(clippy::too_many_arguments)]
+    pub fn roll_campaign(
+        v: &Viewport,
+        camera_x: f32,
+        ground_y: f32,
+        weapon: AttackKind,
+        current: AttackKind,
+        level: u8,
+        held: Boons,
+        timer: i64,
+        rng: &mut Rng,
+    ) -> Self {
+        let (pool, n) = build_pool(current, level, held, Some(weapon));
+        Self::draw(v, camera_x, ground_y, pool, n, timer, rng)
+    }
+
+    /// Shuffles the front of `pool` and stands up to three of it.
+    fn draw(
+        v: &Viewport,
+        camera_x: f32,
+        ground_y: f32,
+        mut pool: [OfferItem; POOL_MAX],
+        n: usize,
+        timer: i64,
+        rng: &mut Rng,
+    ) -> Self {
         // Partial shuffle: three draws is all that is needed, and it keeps the
         // generator's use proportional to what is taken rather than to the pool.
         for i in 0..OFFER_CHOICES.min(n) {
@@ -159,24 +235,71 @@ impl Offer {
             pool.swap(i, j);
         }
 
-        let w = v.wper(5.0);
-        let h = v.hper(10.0);
-        let mut choices = [OfferChoice {
-            item: OfferItem::Attack { kind: AttackKind::Basic, level: 1 },
-            body: Body::default(),
-        }; OFFER_CHOICES];
-        for (i, choice) in choices.iter_mut().enumerate() {
-            let item = pool[i.min(n.saturating_sub(1))];
-            *choice = OfferChoice {
-                item,
-                body: Body::new(
-                    camera_x + v.wper(OFFER_X_PCT[i]) - w / 2.0,
-                    ground_y - h,
-                    w,
-                    h,
-                ),
+        // A count that is *derived* cannot drift out of step with the array the
+        // way a hard-coded three can - and a campaign's pool really does run
+        // short of three near its end.
+        let count = OFFER_CHOICES.min(n);
+        let mut offer = Self::empty(timer);
+        offer.count = count;
+        for i in 0..count {
+            offer.choices[i] = OfferChoice {
+                item: pool[i],
+                body: Self::stand(v, camera_x, ground_y, count, i),
             };
         }
-        Self { choices, live_from: timer + OFFER_ARM_TICKS }
+        offer
     }
+}
+
+/// At most the whole roster, the level-up and every boon.
+const POOL_MAX: usize = AttackKind::ALL.len() + 1 + Boon::ALL.len();
+
+/// Everything a player carrying `current` at `level` and holding `held` could
+/// be shown, and how much of it there is.
+///
+/// `roster` is which weapons may appear. `None` is the endless run's answer:
+/// all of them. `Some(weapon)` is a campaign's: that one and no other, either
+/// as a fresh pick-up or as its next level.
+fn build_pool(
+    current: AttackKind,
+    level: u8,
+    held: Boons,
+    roster: Option<AttackKind>,
+) -> ([OfferItem; POOL_MAX], usize) {
+    let mut pool = [OfferItem::Attack { kind: AttackKind::Basic, level: 1 }; POOL_MAX];
+    let mut n = 0;
+    match roster {
+        Some(weapon) => {
+            // `Basic` is not a weapon that can be picked up or levelled, so a
+            // campaign for it is a campaign of boons.
+            if weapon != AttackKind::Basic {
+                if current != weapon {
+                    pool[n] = OfferItem::Attack { kind: weapon, level: 1 };
+                    n += 1;
+                } else if level < MAX_LEVEL {
+                    pool[n] = OfferItem::Attack { kind: weapon, level: level + 1 };
+                    n += 1;
+                }
+            }
+        }
+        None => {
+            if current != AttackKind::Basic && level < MAX_LEVEL {
+                pool[n] = OfferItem::Attack { kind: current, level: level + 1 };
+                n += 1;
+            }
+            for kind in AttackKind::ALL {
+                if kind != current {
+                    pool[n] = OfferItem::Attack { kind, level: 1 };
+                    n += 1;
+                }
+            }
+        }
+    }
+    for boon in Boon::ALL {
+        if !held.has(boon) {
+            pool[n] = OfferItem::Boon(boon);
+            n += 1;
+        }
+    }
+    (pool, n)
 }
