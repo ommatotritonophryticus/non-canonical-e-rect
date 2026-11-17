@@ -76,10 +76,12 @@ JS plugin, and the sound packs. **The packs have to be served alongside** -
 they are fetched at runtime rather than baked into the binary, so a deploy that
 copies only the wasm plays silently.
 
-It carries the phone layout: a letterboxed field with a drawn pad under it,
-which is the thing worth testing and the thing an Android build would need
-first. Native builds show the same layout with **F2**, so it can be checked with
-a mouse.
+It starts full-window, like a desktop build, and switches to the phone layout -
+a letterboxed field with a drawn pad under it - the first time the page is
+actually touched. Usually that is the tap on the start screen, so a phone never
+sees play without the pad. A mouse click is not a touch and never switches it; a
+key press switches back, for a touchscreen laptop. **F2** toggles the pad by
+hand in every build, so the layout can be checked with a mouse.
 
 ### Sound and settings, and why they look the way they do
 

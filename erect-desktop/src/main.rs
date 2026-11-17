@@ -13,10 +13,10 @@
 //! had (they are all per-tick), but speed no longer depends on the monitor.
 //!
 //! One binary serves three shapes of machine. A desktop fills its window and
-//! reads a keyboard; a browser gets the phone layout, a letterboxed field with
-//! a pad drawn under it, and no sound at all - the mixer wants raw device
-//! access, which is the one thing a first browser build does not have. Silence
-//! was already survivable: the game has always treated sound as optional.
+//! reads a keyboard; a browser does the same until it is touched, and from then
+//! on gets the phone layout, a letterboxed field with a pad drawn under it.
+//! Sound in a browser goes through Web Audio rather than the desktop mixer,
+//! which wants raw device access a page does not have.
 
 mod input;
 mod persist;
@@ -93,6 +93,25 @@ fn touched() -> bool {
         || get_last_key_pressed().is_some()
 }
 
+/// Which layout a browser should be showing, given what the player just did.
+///
+/// A finger on the glass is the only thing that picks the pad: a mouse click
+/// never shows up in `touches()`, so a desktop browser stays full-window no
+/// matter how much it is clicked. A key sends it back, for the laptop with a
+/// touchscreen whose owner reached for the keyboard. Nothing at all keeps
+/// whatever was there. F2 is left out so it can still force the pad for a look
+/// with a mouse.
+#[cfg(target_arch = "wasm32")]
+fn detect_layout(current: bool) -> bool {
+    if !touches().is_empty() {
+        true
+    } else if !is_key_pressed(KeyCode::F2) && get_last_key_pressed().is_some() {
+        false
+    } else {
+        current
+    }
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     // Embedded so the binary is self-contained on every platform - no asset
@@ -125,10 +144,10 @@ async fn main() {
     let renderer = Renderer::new(font);
     let mut reader = InputReader::new();
     let mut pad = touch::TouchPad::new(screen_width(), screen_height());
-    // A browser is assumed to be a phone until proven otherwise - and even on a
-    // desktop browser the pad is what wants testing. Native builds start on the
-    // full window and can switch with F2 to check the layout with a mouse.
-    let mut phone_layout = cfg!(target_arch = "wasm32");
+    // Every build starts on the full window, like a desktop. A browser switches
+    // to the pad the moment it is touched - usually on the start screen, so a
+    // phone never sees a frame of play without it. F2 toggles it by hand.
+    let mut phone_layout = false;
 
     // Unattended run, if one was asked for. Set up after the game exists and
     // before the first frame, so the dev parameters are in place by frame zero.
@@ -149,6 +168,9 @@ async fn main() {
             renderer.render_press_to_start(screen_width(), screen_height());
             next_frame().await;
         }
+        // The tap that got past the screen above is the first chance to see
+        // what kind of machine this is.
+        phone_layout = detect_layout(phone_layout);
 
         let mut loader = sound_web::Loader::new(seed);
         while !loader.settled() {
@@ -188,6 +210,10 @@ async fn main() {
 
     loop {
         let (win_w, win_h) = (screen_width(), screen_height());
+        #[cfg(target_arch = "wasm32")]
+        {
+            phone_layout = detect_layout(phone_layout);
+        }
         if is_key_pressed(KeyCode::F2) {
             phone_layout = !phone_layout;
         }
