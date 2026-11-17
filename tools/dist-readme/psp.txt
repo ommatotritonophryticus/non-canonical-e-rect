@@ -15,15 +15,19 @@ this file travels with the game rather than landing among your own:
 
 Then start it from the PSP's Game menu (Memory Stick).
 
+On a PSP Go the same folders work on internal storage as well
+(ef0:/PSP/GAME/ERECT/...). The game looks for its music and settings beside its
+own EBOOT, wherever that is, so the folder can also be renamed.
+
 Three soundtracks ship and one is drawn at random every time you reach the menu
 and every time you start a run, so a session moves between them. All of them
 have to be present: they are held in memory together, which is what makes the
 change instant instead of a pause while six megabytes are re-read.
 
-If the game cannot find them the title screen says so along the bottom, so if it
-is quiet, look there first. In an emulator the path is relative to whatever you
-have configured as the memory stick root, not to wherever the EBOOT itself was
-opened from.
+Loading them takes a few seconds; a counter shows the progress. If the game
+cannot find them, or there is not enough free memory for even one, the title
+screen says so along the bottom, so if it is quiet, look there first. If memory
+is short for all three, the game plays with as many as fit.
 
 Homebrew needs custom firmware. On stock firmware the EBOOT will not launch.
 Tested in PPSSPP 1.20.4; not verified on real hardware.
@@ -65,7 +69,7 @@ show a white sight that turns red for the last 100 ms before they fire - that is
 the moment to step out of the line.
 
 Music and effect volumes are in Settings.
-Settings and high scores are written to ms0:/PSP/GAME/ERECT/settings.dat
+Settings and high scores are written to settings.dat beside the EBOOT.
 
 Licences
 --------

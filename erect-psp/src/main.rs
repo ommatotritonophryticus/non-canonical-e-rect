@@ -9,6 +9,7 @@
 
 #![no_std]
 #![no_main]
+#![feature(asm_experimental_arch)]
 
 extern crate alloc;
 
@@ -27,11 +28,38 @@ use psp::sys;
 
 psp::module!("erect", 1, 0);
 
+/// Turns off floating-point traps for the calling thread.
+///
+/// On hardware the Allegrex FPU can trap on a division by zero, an overflow or
+/// a NaN, and a trap kills the thread on the spot; PPSSPP does not model FPU
+/// exceptions at all, so code that is clean there proves nothing about this.
+/// pspsdk ships `pspSdkDisableFPUExceptions` for exactly that reason, and this
+/// is what it does: keep the condition bit, clear the rest of FCR31 - every
+/// enable, every cause, round-to-nearest. The game expects IEEE behaviour,
+/// infinities and all, the same as on every other platform it runs on.
+pub fn quiet_fpu() {
+    unsafe {
+        core::arch::asm!(
+            "cfc1 $8, $31",
+            "lui $9, 0x80",
+            "and $8, $8, $9",
+            "ctc1 $8, $31",
+            out("$8") _,
+            out("$9") _,
+            options(nomem, nostack),
+        );
+    }
+}
+
 fn psp_main() {
+    quiet_fpu();
     psp::enable_home_button();
 
     unsafe {
         gfx::init();
+        // Something on screen before anything that can take time or fail, so
+        // a black screen means the GE itself, not a slow Memory Stick.
+        render::render_loading(0, sound::files_to_load());
     }
 
     let viewport = Viewport::new(gfx::SCREEN_W as f32, gfx::SCREEN_H as f32);
@@ -47,7 +75,9 @@ fn psp_main() {
     );
 
     // Silence is the fallback: a missing pack must not stop the game.
-    let has_sound = unsafe { sound::start(seed) };
+    let total = sound::files_to_load();
+    let has_sound =
+        unsafe { sound::start(seed, &mut |done| render::render_loading(done, total)) };
 
     let mut pad = unsafe { input::Input::new() };
     #[cfg(feature = "screenshot")]

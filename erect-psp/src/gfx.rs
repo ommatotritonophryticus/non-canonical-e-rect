@@ -59,6 +59,11 @@ pub const BLACK: u32 = 0xff00_0000;
 pub unsafe fn init() {
     unsafe {
         font::init();
+        // The atlas was just written through the CPU's data cache, and the GE
+        // reads RAM, not the cache. PPSSPP has no cache to get wrong, so text
+        // drew there; on hardware whatever had not been evicted yet would
+        // come out as holes in the glyphs.
+        sys::sceKernelDcacheWritebackAll();
 
         let list = core::ptr::addr_of_mut!(DISPLAY_LIST) as *mut c_void;
         sys::sceGuInit();

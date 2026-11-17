@@ -70,6 +70,36 @@ pub unsafe fn render(game: &Game) {
     }
 }
 
+/// The screen shown while the packs come off the Memory Stick: a few seconds
+/// on hardware, which used to be a few seconds of black.
+///
+/// Draws a whole frame of its own; call it outside `begin_frame`/`end_frame`.
+pub fn render_loading(done: u32, total: u32) {
+    let (w, h) = (SCREEN_W as f32, SCREEN_H as f32);
+    let label = format!("LOADING MUSIC {}/{}", done, total);
+    let size = 14.0;
+    let bar_w = w * 0.6;
+    let bar_h = 6.0;
+    let filled = if total == 0 {
+        0.0
+    } else {
+        bar_w * done.min(total) as f32 / total as f32
+    };
+    unsafe {
+        gfx::begin_frame(BLACK);
+        gfx::text(
+            (w - crate::font::text_width(&label, size)) / 2.0,
+            h * 0.5 - 8.0,
+            size,
+            WHITE,
+            &label,
+        );
+        gfx::rect((w - bar_w) / 2.0, h * 0.5 + 4.0, bar_w, bar_h, DIM);
+        gfx::rect((w - bar_w) / 2.0, h * 0.5 + 4.0, filled, bar_h, WHITE);
+        gfx::end_frame();
+    }
+}
+
 /// Shown over the frozen battlefield after a run ends.
 unsafe fn render_result(game: &Game, result: &RunResult) {
     unsafe {

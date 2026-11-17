@@ -6,8 +6,13 @@
 use erect_core::settings::Settings;
 use psp::sys::{self, IoOpenFlags};
 
-const PATH: &[u8] = b"ms0:/PSP/GAME/ERECT/settings.dat\0";
-const DIR: &[u8] = b"ms0:/PSP/GAME/ERECT\0";
+/// Beside the EBOOT, wherever that is: the psp crate changes into its folder
+/// before `psp_main`. On a PSP Go that folder is on `ef0:`, internal storage,
+/// and a fixed `ms0:` path finds nothing there.
+const PATH: &[u8] = b"settings.dat\0";
+/// For anything that starts the EBOOT without saying where it lives.
+const FALLBACK_PATH: &[u8] = b"ms0:/PSP/GAME/ERECT/settings.dat\0";
+const FALLBACK_DIR: &[u8] = b"ms0:/PSP/GAME/ERECT\0";
 /// Bumped whenever the layout below changes, so old files are ignored.
 const MAGIC: u32 = 0x4552_4303;
 const RECORD_LEN: usize = 4 + 4 + 4 + 8 + 8 + 4 + 4 + 8;
@@ -17,7 +22,10 @@ pub fn load() -> Settings {
     let mut buf = [0u8; RECORD_LEN];
 
     unsafe {
-        let fd = sys::sceIoOpen(PATH.as_ptr(), IoOpenFlags::RD_ONLY, 0o777);
+        let mut fd = sys::sceIoOpen(PATH.as_ptr(), IoOpenFlags::RD_ONLY, 0o777);
+        if fd.0 < 0 {
+            fd = sys::sceIoOpen(FALLBACK_PATH.as_ptr(), IoOpenFlags::RD_ONLY, 0o777);
+        }
         if fd.0 < 0 {
             return settings;
         }
@@ -63,13 +71,13 @@ pub fn save(settings: &Settings) {
     buf[36..44].copy_from_slice(&settings.launches.to_le_bytes());
 
     unsafe {
-        // The directory may not exist on a fresh stick; failure is fine.
-        sys::sceIoMkdir(DIR.as_ptr(), 0o777);
-        let fd = sys::sceIoOpen(
-            PATH.as_ptr(),
-            IoOpenFlags::CREAT | IoOpenFlags::TRUNC | IoOpenFlags::WR_ONLY,
-            0o777,
-        );
+        let flags = || IoOpenFlags::CREAT | IoOpenFlags::TRUNC | IoOpenFlags::WR_ONLY;
+        let mut fd = sys::sceIoOpen(PATH.as_ptr(), flags(), 0o777);
+        if fd.0 < 0 {
+            // The directory may not exist on a fresh stick; failure is fine.
+            sys::sceIoMkdir(FALLBACK_DIR.as_ptr(), 0o777);
+            fd = sys::sceIoOpen(FALLBACK_PATH.as_ptr(), flags(), 0o777);
+        }
         if fd.0 >= 0 {
             sys::sceIoWrite(fd, buf.as_ptr() as *const _, RECORD_LEN);
             sys::sceIoClose(fd);
