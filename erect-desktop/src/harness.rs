@@ -84,6 +84,9 @@ impl Harness {
         let mut screen: Option<String> = None;
         let mut once = false;
         let mut lull = false;
+        // Whether `score=` was given at all. A head start brings its own score,
+        // and an unasked-for zero must not overwrite it.
+        let mut score_given = false;
         let mut written: Option<(erect_core::campaign::ModeKind, erect_core::attack::AttackKind)> =
             None;
         let mut wall = erect_core::boon::WallMod::Plain;
@@ -91,7 +94,10 @@ impl Harness {
             let (key, value) = part.split_once('=').unwrap_or((part, ""));
             match key {
                 "wave" => dev.wave = value.parse().unwrap_or(1),
-                "score" => dev.score = value.parse().unwrap_or(0),
+                "score" => {
+                    dev.score = value.parse().unwrap_or(0);
+                    score_given = true;
+                }
                 "rule" => {
                     dev.rule = match value {
                         "blind" => Some(erect_core::waves::WaveRule::Hidden),
@@ -106,6 +112,7 @@ impl Harness {
                     if let Some((mode, weapon)) = value.split_once(':') {
                         let kind = match mode {
                             "campaign" => erect_core::campaign::ModeKind::Campaign,
+                            "headstart" => erect_core::campaign::ModeKind::HeadStart,
                             _ => erect_core::campaign::ModeKind::Tutorial,
                         };
                         let weapon = erect_core::attack::AttackKind::EVERY
@@ -179,13 +186,17 @@ impl Harness {
         match screen.as_deref() {
             Some("dev") => game.state = erect_core::game::State::DevMenu,
             Some("title") => game.state = erect_core::game::State::Title,
-            // `campaigns` opens on the tutorial, `campaigns2` on the campaign:
-            // the screen changes its heading with the mode, so both halves of
-            // it have to be capturable.
+            // `campaigns` opens on the tutorial, `campaigns2` on the campaign,
+            // `campaigns3` on the head start: the screen changes its heading
+            // with the mode, so every one of them has to be capturable.
             Some("campaigns") => game.state = erect_core::game::State::Campaigns,
             Some("campaigns2") => {
                 game.state = erect_core::game::State::Campaigns;
                 game.campaign_mode = 1;
+            }
+            Some("campaigns3") => {
+                game.state = erect_core::game::State::Campaigns;
+                game.campaign_mode = 2;
             }
             _ => match written {
                 Some((kind, weapon)) => {
@@ -193,8 +204,10 @@ impl Harness {
                     // `score=` still applies, so a campaign lull can be reached
                     // without playing the twenty minutes it would cost to earn
                     // the first one.
-                    if let Some(p) = game.players.first_mut() {
-                        p.score = dev.score;
+                    if score_given {
+                        if let Some(p) = game.players.first_mut() {
+                            p.score = dev.score;
+                        }
                     }
                     // And `level=` seeds the weapon, so the end of a campaign
                     // can be photographed without earning every offer between

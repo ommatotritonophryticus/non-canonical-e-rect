@@ -80,7 +80,7 @@ pub struct RunResult {
     pub wave: i64,
     pub players: usize,
     pub is_record: bool,
-    /// Set when the run was finished rather than ended, to which of the two
+    /// Set when the run was finished rather than ended, to which of the
     /// written modes was finished. Only a written run can be; an endless one
     /// has nothing to reach.
     pub cleared: Option<ModeKind>,
@@ -99,6 +99,7 @@ impl RunResult {
         match self.cleared {
             Some(ModeKind::Tutorial) => "TUTORIAL CLEAR",
             Some(ModeKind::Campaign) => "CAMPAIGN CLEAR",
+            Some(ModeKind::HeadStart) => "HEAD START CLEAR",
             None => "GAME OVER",
         }
     }
@@ -134,7 +135,7 @@ pub struct Game {
     pub mode: RunMode,
     /// Which weapon the campaign screen is showing.
     pub campaign_pick: usize,
-    /// Which of the two written modes the campaign screen is showing.
+    /// Which of the written modes the campaign screen is showing.
     pub campaign_mode: usize,
     /// How far through its script a tutorial has got. Counted in offers given,
     /// not in offers taken: declining one by starting the wave early spends it,
@@ -530,7 +531,7 @@ impl Game {
     /// True when this wave, now cleared, was the one that finished the run.
     ///
     /// A tutorial ends on a number, because it is three waves by construction.
-    /// A campaign ends one wave after its weapon reaches its last level - and
+    /// A campaign - and a head start, which is one - ends one wave after its weapon reaches its last level - and
     /// "one wave after" falls out of where this is called from rather than
     /// being counted: the offer that could grant that level is created further
     /// down this same function, so the earliest clear that can see the level is
@@ -542,7 +543,7 @@ impl Game {
     fn written_run_finished(&self, kind: ModeKind, weapon: AttackKind) -> bool {
         match kind {
             ModeKind::Tutorial => self.wave >= campaign::TUTORIAL_LAST_WAVE,
-            ModeKind::Campaign => self.players.iter().any(|p| {
+            ModeKind::Campaign | ModeKind::HeadStart => self.players.iter().any(|p| {
                 if weapon == AttackKind::Basic {
                     p.boons.full()
                 } else {
@@ -552,33 +553,64 @@ impl Game {
         }
     }
 
-    /// Starts a written run - a tutorial or a campaign - for one weapon.
+    /// Starts a written run - a tutorial, a campaign or a head start - for
+    /// one weapon.
     ///
-    /// The weapon is not handed over here - the script's first step offers it,
-    /// so the run opens on the plain swing exactly as any other does and the
-    /// first lull is where it changes. `Basic` has no such step and keeps the
+    /// In a campaign the weapon is not handed over here - the roll offers it,
+    /// so the run opens on the plain swing exactly as any other does and a
+    /// lull is where it changes. `Basic` has no weapon to offer and keeps the
     /// plain swing, and its combo finisher, for the whole run.
     ///
     /// A tutorial also pins the wave modifiers off. Three waves is not enough
     /// room for a variant to be met and understood, and being handed BLIND on
     /// the wave that teaches the weapon would teach nothing at all.
+    ///
+    /// A head start skips the opening of a campaign: it begins on a later wave
+    /// with score on the board and the weapon already in hand. The modifiers
+    /// stay as rolled, the same as the campaign it is.
     pub fn start_written(&mut self, kind: ModeKind, weapon: AttackKind, player_count: usize) {
         self.start_run(player_count);
         self.mode = RunMode::Written(kind, weapon);
         self.campaign_step = 0;
-        if kind == ModeKind::Tutorial {
-            self.waves.forced_kind = Some(WaveKind::Mixed);
-            self.waves.forced_rule = Some(WaveRule::Normal);
-            // The first wave was rolled by `start_run`, before the pins were
-            // set. Roll it again now that they are.
-            self.waves.begin_wave(self.wave, &mut self.rng);
-            // A wave a level: the first is fought with the weapon already in
-            // hand, and the two lulls raise it the rest of the way.
-            if let Some(weapon) = campaign::tutorial_start(weapon) {
-                for p in self.players.iter_mut() {
-                    p.attack = weapon;
-                    p.attack_level = 1;
+        match kind {
+            ModeKind::Tutorial => {
+                self.waves.forced_kind = Some(WaveKind::Mixed);
+                self.waves.forced_rule = Some(WaveRule::Normal);
+                // The first wave was rolled by `start_run`, before the pins
+                // were set. Roll it again now that they are.
+                self.waves.begin_wave(self.wave, &mut self.rng);
+                // A wave a level: the first is fought with the weapon already
+                // in hand, and the two lulls raise it the rest of the way.
+                self.hand_over(campaign::starting_weapon(weapon));
+            }
+            ModeKind::HeadStart => {
+                self.wave = campaign::HEAD_START_WAVE;
+                // The whole score goes to the first player, as the developer
+                // menu does it, so the team total is the advertised number.
+                if let Some(p) = self.players.first_mut() {
+                    p.score = campaign::HEAD_START_SCORE;
                 }
+                // Offers are paid for in score. The thresholds this score has
+                // already passed were what a campaign spends on handing the
+                // weapon over, and the weapon is handed over below - so the
+                // next offer is the next threshold up, not one owed at once.
+                self.next_offer_score = (campaign::HEAD_START_SCORE / OFFER_SCORE_STEP + 1)
+                    * OFFER_SCORE_STEP;
+                // `start_run` settled wave one; settle the wave this opens on.
+                let wave = self.wave;
+                self.waves.begin_wave(wave, &mut self.rng);
+                self.hand_over(campaign::starting_weapon(weapon));
+            }
+            ModeKind::Campaign => {}
+        }
+    }
+
+    /// Puts `weapon` in every player's hands at level one, if there is one.
+    fn hand_over(&mut self, weapon: Option<AttackKind>) {
+        if let Some(weapon) = weapon {
+            for p in self.players.iter_mut() {
+                p.attack = weapon;
+                p.attack_level = 1;
             }
         }
     }
@@ -857,7 +889,7 @@ impl Game {
         // offering one twice would be offering nothing.
         let held = self.players[0].boons;
 
-        if let Some((ModeKind::Campaign, weapon)) = written {
+        if let Some((_, weapon)) = written.filter(|(kind, _)| kind.is_campaign()) {
             // A real roll, only without the roster: the weapon's next step and
             // whatever boons are still outstanding. What the campaign takes
             // away is the option to become a different run, not the choosing.
@@ -1487,8 +1519,8 @@ impl Game {
     }
 
     /// How the campaign screen describes what has been done with this weapon
-    /// in this mode. Nine weapons times two modes are eighteen separate things
-    /// to finish, and the only way to know which is still owed is to be told.
+    /// in this mode. Nine weapons times three modes are twenty-seven separate
+    /// things to finish, and the only way to know which is still owed is to be told.
     pub fn campaign_status(&self) -> String {
         let weapon = self.campaign_choice();
         let done = self.settings.mode_record(self.campaign_mode_choice(), weapon);

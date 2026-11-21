@@ -7965,7 +7965,7 @@ fn the_written_screen_starts_what_it_names() {
 
 #[test]
 fn the_status_line_follows_the_mode_row() {
-    // Nine weapons in two modes are eighteen separate records, and the screen
+    // Nine weapons in three modes are twenty-seven separate records, and the screen
     // must show the one it is pointing at.
     let mut game = new_game();
     game.state = State::Campaigns;
@@ -8663,4 +8663,116 @@ fn a_boss_already_over_the_cap_trims_down_to_it() {
 
     game.waves.rule = WaveRule::StaticCamera;
     assert_eq!(husks_after_hits(&mut game, 1), STATIC_CAMERA_HUSKS);
+}
+
+/* ---------------- the head start ---------------- */
+
+#[test]
+fn a_head_start_opens_on_wave_seven_with_the_score_and_the_weapon() {
+    let mut game = new_game();
+    game.start_written(ModeKind::HeadStart, AttackKind::Lunge, 1);
+    assert_eq!(game.state, State::Playing);
+    assert_eq!(game.mode, RunMode::Written(ModeKind::HeadStart, AttackKind::Lunge));
+    assert_eq!(game.wave, 7);
+    assert_eq!(game.total_score(), 5000);
+    assert_eq!(game.players[0].attack, AttackKind::Lunge, "the weapon is in hand");
+    assert_eq!(game.players[0].attack_level, 1);
+}
+
+#[test]
+fn a_head_start_wave_is_the_seventh_and_not_the_first_renumbered() {
+    // The wave manager settles a wave by its number, so it has to have been
+    // told the new one - clearing it must lead to the eighth.
+    let mut game = written_run(ModeKind::HeadStart, AttackKind::Hammer);
+    skip_the_wave(&mut game);
+    assert_eq!(game.wave, 8);
+    assert!(game.result.is_none(), "one cleared wave is not the end of it");
+}
+
+#[test]
+fn a_plain_head_start_keeps_the_plain_swing() {
+    let mut game = new_game();
+    game.start_written(ModeKind::HeadStart, AttackKind::Basic, 1);
+    assert_eq!(game.wave, 7);
+    assert_eq!(game.players[0].attack, AttackKind::Basic);
+}
+
+#[test]
+fn a_head_start_owes_no_offer_for_the_score_it_was_given() {
+    // The thresholds the head start's score has already passed paid for the
+    // weapon it was handed. The first offer is the next threshold up.
+    let mut game = written_run(ModeKind::HeadStart, AttackKind::Lunge);
+    skip_the_wave(&mut game);
+    assert!(game.offer.is_none(), "an offer was owed for the score it started with");
+    game.waves.skip_countdown();
+
+    game.players[0].score = 2 * OFFER_SCORE_STEP;
+    skip_the_wave(&mut game);
+    let offer = game.offer.as_ref().expect("the next threshold should pay");
+    for item in offer.choices.iter().take(offer.count).map(|c| c.item) {
+        if let OfferItem::Attack { kind, .. } = item {
+            assert_eq!(kind, AttackKind::Lunge, "a head start is a campaign: one weapon");
+        }
+    }
+}
+
+#[test]
+fn a_head_start_ends_as_a_campaign_does_and_is_filed_apart() {
+    let mut game = written_run(ModeKind::HeadStart, AttackKind::Lunge);
+    let wave = play_out_campaign(&mut game);
+    let result = game.result.expect("the run should have ended");
+    assert!(result.won(), "mastering the weapon is the win here too");
+    assert_eq!(result.headline(), "HEAD START CLEAR");
+    assert!(wave > 7);
+    assert!(game.settings.mode_record(ModeKind::HeadStart, AttackKind::Lunge).cleared);
+    assert!(
+        !game.settings.mode_record(ModeKind::Campaign, AttackKind::Lunge).cleared,
+        "a head start is not a campaign cleared from the start"
+    );
+    assert_eq!(game.settings.record_solo, 0, "nor an endless record");
+}
+
+#[test]
+fn the_written_screen_reaches_the_head_start() {
+    use crate::menu::MenuAction;
+    let mut game = new_game();
+    game.state = State::Campaigns;
+    game.campaign_menu.index = 0;
+    let mut right = idle();
+    right.menu.right = true;
+    game.tick(&right);
+    game.tick(&right);
+    assert_eq!(game.campaign_mode_choice(), ModeKind::HeadStart);
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    assert_eq!(rows[0].label, "MODE: HEAD START");
+
+    let start = rows
+        .iter()
+        .position(|r| r.action == MenuAction::StartCampaign)
+        .expect("the screen should offer START");
+    game.campaign_menu.index = start;
+    let weapon = game.campaign_choice();
+    let mut confirm = idle();
+    confirm.menu.confirm = true;
+    game.tick(&confirm);
+    assert_eq!(game.mode, RunMode::Written(ModeKind::HeadStart, weapon));
+    assert_eq!(game.wave, 7);
+}
+
+#[test]
+fn the_head_start_tagline_says_what_the_constants_do() {
+    let tagline = ModeKind::HeadStart.tagline();
+    let wave = alloc::format!("WAVE {}", crate::campaign::HEAD_START_WAVE);
+    let score = alloc::format!("{} POINTS", crate::campaign::HEAD_START_SCORE);
+    assert!(tagline.contains(&wave), "{tagline}");
+    assert!(tagline.contains(&score), "{tagline}");
+}
+
+#[test]
+fn every_written_mode_files_into_its_own_column() {
+    let mut seen = [false; ModeKind::EVERY.len()];
+    for kind in ModeKind::EVERY {
+        assert!(!seen[kind.index()], "{:?} shares a column", kind);
+        seen[kind.index()] = true;
+    }
 }

@@ -172,7 +172,7 @@ unsafe fn render_settings(game: &Game) {
     }
 }
 
-/// See the desktop renderer: eighteen written runs, and the line that says
+/// See the desktop renderer: twenty-seven written runs, and the line that says
 /// which are still owed.
 unsafe fn render_campaigns(game: &Game) {
     unsafe {

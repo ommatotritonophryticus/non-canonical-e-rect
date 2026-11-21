@@ -31,9 +31,9 @@ struct StoredSettings {
     #[serde(default)]
     launches: u64,
     /// One entry per weapon, in `AttackKind::EVERY` order. Written flat rather
-    /// than as objects: nine of those cost most of the kilobyte a browser gives
-    /// this document, and three parallel lists say the same thing in a fifth of
-    /// the space.
+    /// than as objects: nine objects per mode would be most of the room a
+    /// browser gives this document, and three parallel lists say the same thing
+    /// in a fifth of the space.
     #[serde(default)]
     campaign_cleared: Vec<bool>,
     #[serde(default)]
@@ -50,6 +50,14 @@ struct StoredSettings {
     tutorial_wave: Vec<i64>,
     #[serde(default)]
     tutorial_score: Vec<i64>,
+    /// And again for the head starts, for the same reason: a save from before
+    /// them must read as "none attempted".
+    #[serde(default)]
+    head_start_cleared: Vec<bool>,
+    #[serde(default)]
+    head_start_wave: Vec<i64>,
+    #[serde(default)]
+    head_start_score: Vec<i64>,
 }
 
 /// Missing from an older save file means the setting did not exist yet, and
@@ -101,6 +109,11 @@ fn parse(text: &str) -> Settings {
         slot.best_wave = stored.tutorial_wave.get(i).copied().unwrap_or(0);
         slot.best_score = stored.tutorial_score.get(i).copied().unwrap_or(0);
     }
+    for (i, slot) in settings.head_start.iter_mut().enumerate() {
+        slot.cleared = stored.head_start_cleared.get(i).copied().unwrap_or(false);
+        slot.best_wave = stored.head_start_wave.get(i).copied().unwrap_or(0);
+        slot.best_score = stored.head_start_score.get(i).copied().unwrap_or(0);
+    }
     settings.dirty = false;
     // Game::new sanitizes this against the real scheme count.
     settings
@@ -128,6 +141,9 @@ fn encode(settings: &Settings) -> Option<String> {
         tutorial_cleared: settings.tutorial.iter().map(|c| c.cleared).collect(),
         tutorial_wave: settings.tutorial.iter().map(|c| c.best_wave).collect(),
         tutorial_score: settings.tutorial.iter().map(|c| c.best_score).collect(),
+        head_start_cleared: settings.head_start.iter().map(|c| c.cleared).collect(),
+        head_start_wave: settings.head_start.iter().map(|c| c.best_wave).collect(),
+        head_start_score: settings.head_start.iter().map(|c| c.best_score).collect(),
     };
     serde_json::to_string(&stored).ok()
 }
@@ -168,10 +184,15 @@ extern "C" {
     fn erect_storage_read(ptr: *mut u8, cap: u32) -> u32;
 }
 
-/// Room for the settings document. It is a handful of small integers and two
-/// fields per player; a kilobyte is an order of magnitude more than it can be.
-#[cfg(target_arch = "wasm32")]
-const STORAGE_CAP: usize = 1024;
+/// Room for the settings document.
+///
+/// Ours to choose, not the browser's: the buffer is allocated on this side and
+/// localStorage itself holds megabytes. A kilobyte was enough until the third
+/// written mode, whose three lists took a full document past it; four leaves
+/// room for several more before this has to move again, and the tests below
+/// check the fullest possible document against it.
+#[cfg(any(target_arch = "wasm32", test))]
+const STORAGE_CAP: usize = 4096;
 
 #[cfg(target_arch = "wasm32")]
 pub fn load() -> Settings {
@@ -239,38 +260,42 @@ mod tests {
 
     #[test]
     fn a_document_with_every_mode_recorded_still_fits() {
-        // Nine weapons times two modes, every one cleared, every number at its
-        // widest. The browser side refuses to write past its buffer, so a
+        // Nine weapons times three modes, every one cleared, every number at
+        // its widest. The browser side refuses to write past its buffer, so a
         // document that outgrew it would silently stop loading - and it would
         // do so only for the players who had got furthest.
         let mut settings = Settings::default();
         settings.record_solo = i64::MAX;
         settings.record_duo = i64::MAX;
         settings.launches = u64::MAX;
-        for slot in settings.campaign.iter_mut().chain(settings.tutorial.iter_mut()) {
+        for slot in settings
+            .campaign
+            .iter_mut()
+            .chain(settings.tutorial.iter_mut())
+            .chain(settings.head_start.iter_mut())
+        {
             slot.cleared = true;
             slot.best_wave = 999;
             slot.best_score = i64::MAX;
         }
-        // 844 bytes of the 1024 the browser gives it. A third mode's three
-        // lists would cost about 320 more and would not fit: that is the point
-        // at which this format has to change, not a byte later.
         let text = encode(&settings).expect("settings should encode");
-        assert!(text.len() < 1024, "the document is {} bytes", text.len());
+        assert!(text.len() < STORAGE_CAP, "the document is {} bytes", text.len());
         let back = parse(&text);
         assert_eq!(back.campaign, settings.campaign, "and it must survive the trip");
-        assert_eq!(back.tutorial, settings.tutorial, "both halves of it");
+        assert_eq!(back.tutorial, settings.tutorial, "every table of it");
+        assert_eq!(back.head_start, settings.head_start, "every table of it");
     }
 
     #[test]
     fn a_save_from_before_written_runs_still_loads() {
-        // Six lists that are simply absent. Every weapon reads as untouched in
-        // both modes, which is what it was.
+        // Nine lists that are simply absent. Every weapon reads as untouched in
+        // every mode, which is what it was.
         let old = r#"{"players":[{"scheme":0,"color_index":0},{"scheme":1,"color_index":1}],"record_solo":700,"record_duo":0,"music_volume":100,"sfx_volume":100,"launches":9}"#;
         let settings = parse(old);
         assert_eq!(settings.record_solo, 700, "the old fields still read");
         assert!(settings.campaign.iter().all(|c| !c.cleared && c.best_wave == 0));
         assert!(settings.tutorial.iter().all(|c| !c.cleared && c.best_wave == 0));
+        assert!(settings.head_start.iter().all(|c| !c.cleared && c.best_wave == 0));
     }
 
     #[test]
@@ -282,6 +307,6 @@ mod tests {
         settings.record_duo = i64::MAX;
         settings.launches = u64::MAX;
         let text = encode(&settings).expect("settings should encode");
-        assert!(text.len() < 1024, "the document is {} bytes", text.len());
+        assert!(text.len() < STORAGE_CAP, "the document is {} bytes", text.len());
     }
 }

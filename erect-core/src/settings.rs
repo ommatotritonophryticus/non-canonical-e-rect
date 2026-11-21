@@ -56,6 +56,10 @@ pub struct Settings {
     pub tutorial: [ModeRecord; AttackKind::EVERY.len()],
     /// How each weapon's campaign has gone, filed by [`AttackKind::index`].
     pub campaign: [ModeRecord; AttackKind::EVERY.len()],
+    /// How each weapon's head start has gone. Kept apart from the campaign's:
+    /// starting on wave seven with five thousand in hand makes its waves and
+    /// scores a different thing to compare.
+    pub head_start: [ModeRecord; AttackKind::EVERY.len()],
 }
 
 /// Which of the two volume rows is being adjusted.
@@ -89,6 +93,7 @@ impl Default for Settings {
             dirty: false,
             tutorial: [ModeRecord::default(); AttackKind::EVERY.len()],
             campaign: [ModeRecord::default(); AttackKind::EVERY.len()],
+            head_start: [ModeRecord::default(); AttackKind::EVERY.len()],
         }
     }
 }
@@ -183,6 +188,7 @@ impl Settings {
         match kind {
             ModeKind::Tutorial => &self.tutorial,
             ModeKind::Campaign => &self.campaign,
+            ModeKind::HeadStart => &self.head_start,
         }
     }
 
@@ -190,6 +196,7 @@ impl Settings {
         match kind {
             ModeKind::Tutorial => &mut self.tutorial,
             ModeKind::Campaign => &mut self.campaign,
+            ModeKind::HeadStart => &mut self.head_start,
         }
     }
 

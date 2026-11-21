@@ -340,10 +340,10 @@ impl Renderer {
         self.draw_centered(v, "ESC OR B TO GO BACK", 83.0, size, hint);
     }
 
-    /// Choosing which weapon, and which of the two written runs, to spend.
+    /// Choosing which weapon, and which of the written runs, to spend.
     ///
     /// The line under the menu is the reason the screen exists: nine weapons in
-    /// two modes are eighteen separate things to finish, and the only way to
+    /// three modes are twenty-seven separate things to finish, and the only way to
     /// know which is still owed is to be told. The heading follows the chosen
     /// mode, so the screen names what START will actually begin.
     fn render_campaigns(&self, game: &Game, pads_connected: [bool; MAX_PLAYERS]) {
