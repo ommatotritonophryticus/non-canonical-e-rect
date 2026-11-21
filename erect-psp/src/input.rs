@@ -25,6 +25,10 @@ struct PadState {
     square: bool,
     circle: bool,
     triangle: bool,
+    /// Shoulder buttons: L doubles jump, R doubles dash, so both can be had
+    /// without taking a thumb off the d-pad or the face buttons.
+    l: bool,
+    r: bool,
     start: bool,
     /// Only ever a modifier: nothing in the game itself is bound to it.
     select: bool,
@@ -71,6 +75,8 @@ impl Input {
             square: b.contains(CtrlButtons::SQUARE),
             circle: b.contains(CtrlButtons::CIRCLE),
             triangle: b.contains(CtrlButtons::TRIANGLE),
+            l: b.contains(CtrlButtons::LTRIGGER),
+            r: b.contains(CtrlButtons::RTRIGGER),
             start: b.contains(CtrlButtons::START),
             select: b.contains(CtrlButtons::SELECT),
         };
@@ -87,12 +93,12 @@ impl Input {
         frame.players[0] = PlayerIntent {
             left: c.left,
             right: c.right,
-            jump: pressed(c.cross, p.cross),
+            jump: pressed(c.cross, p.cross) || pressed(c.l, p.l),
             // Slam is Circle or d-pad down, whichever the player reaches for.
             slam: pressed(c.circle, p.circle) || pressed(c.down, p.down),
             attack: pressed(c.square, p.square),
             attack_held: c.square,
-            dash: pressed(c.triangle, p.triangle),
+            dash: pressed(c.triangle, p.triangle) || pressed(c.r, p.r),
         };
 
         frame.menu = MenuIntent {

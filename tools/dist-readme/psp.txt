@@ -35,9 +35,9 @@ Tested in PPSSPP 1.20.4; not verified on real hardware.
 Controls
 --------
     D-pad / analog nub   move
-    Cross                jump
+    Cross / L            jump
     Square               attack
-    Triangle             dash - a short burst that shoves what it passes
+    Triangle / R         dash - a short burst that shoves what it passes
                          through and cannot be touched while it lasts
     Circle / Down        ground slam - puts up the wall
     Start                pause menu
