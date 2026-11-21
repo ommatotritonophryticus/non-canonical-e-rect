@@ -601,7 +601,13 @@ impl Game {
                 self.waves.begin_wave(wave, &mut self.rng);
                 self.hand_over(campaign::starting_weapon(weapon));
             }
-            ModeKind::Campaign => {}
+            ModeKind::Campaign => {
+                // `Basic` is never offered - the plain swing is in hand from
+                // the first frame - so starting its campaign is taking it.
+                if weapon == AttackKind::Basic {
+                    self.settings.unlock_head_start(weapon);
+                }
+            }
         }
     }
 
@@ -935,6 +941,16 @@ impl Game {
         // for the rest of the run.
         if let OfferItem::Rule(rule) = choice.item {
             self.waves.rule = rule;
+        }
+        // Taking a campaign's own weapon is what opens its head start. Only in
+        // a campaign: a tutorial hands the weapon over unasked, and an endless
+        // run is not where the opening of a campaign gets played.
+        if let (OfferItem::Attack { kind, .. }, Some((ModeKind::Campaign, weapon))) =
+            (choice.item, self.mode.written())
+        {
+            if kind == weapon {
+                self.settings.unlock_head_start(weapon);
+            }
         }
         // Everyone gets it: one offer stands in the lull and either player may
         // be the one to reach it.
@@ -1513,6 +1529,22 @@ impl Game {
         AttackKind::EVERY[self.campaign_pick.min(AttackKind::EVERY.len() - 1)]
     }
 
+    /// Whether a written run of `kind` for `weapon` can be started yet. Only a
+    /// head start is ever closed; see [`Settings::head_start_open`].
+    pub fn written_open(&self, kind: ModeKind, weapon: AttackKind) -> bool {
+        match kind {
+            ModeKind::HeadStart => self.settings.head_start_open(weapon),
+            ModeKind::Tutorial | ModeKind::Campaign => true,
+        }
+    }
+
+    /// True for a menu row that is shown but cannot be used yet. The
+    /// renderers grey it out; confirming it does nothing.
+    pub fn row_locked(&self, row: &MenuRow) -> bool {
+        row.action == MenuAction::StartCampaign
+            && !self.written_open(self.campaign_mode_choice(), self.campaign_choice())
+    }
+
     /// The mode the campaign screen is showing.
     pub fn campaign_mode_choice(&self) -> ModeKind {
         ModeKind::EVERY[self.campaign_mode.min(ModeKind::EVERY.len() - 1)]
@@ -1523,6 +1555,9 @@ impl Game {
     /// things to finish, and the only way to know which is still owed is to be told.
     pub fn campaign_status(&self) -> String {
         let weapon = self.campaign_choice();
+        if !self.written_open(self.campaign_mode_choice(), weapon) {
+            return campaign::HEAD_START_LOCKED.to_string();
+        }
         let done = self.settings.mode_record(self.campaign_mode_choice(), weapon);
         if done.cleared {
             format!("CLEARED - BEST {}", done.best_score)
@@ -1636,7 +1671,11 @@ impl Game {
             }
             Some(MenuAction::StartCampaign) => {
                 let (kind, weapon) = (self.campaign_mode_choice(), self.campaign_choice());
-                self.start_written(kind, weapon, 1);
+                // Locked: the row is greyed out and the line under the menu
+                // says what opens it, so there is nothing more to do here.
+                if self.written_open(kind, weapon) {
+                    self.start_written(kind, weapon, 1);
+                }
             }
             Some(MenuAction::StartDevRun) => self.start_dev_run(),
             Some(MenuAction::Quit) => self.quit_requested = true,

@@ -25,6 +25,10 @@
 //! need to sit through them again. From there on it is a campaign - same pool,
 //! same end.
 //!
+//! Which is also why it is locked until that is true: a weapon's head start
+//! opens the first time the weapon is taken in its campaign. Skipping the
+//! opening is for someone who has played it.
+//!
 //! Everything else is the ordinary game. The waves, their modifiers, the
 //! rolled heavies, the bosses, the crowd limits: all of it as it always was.
 
@@ -50,6 +54,10 @@ pub const HEAD_START_WAVE: i64 = 7;
 /// the mode's record, and towards the next offer - which, with the weapon
 /// already handed over, is the one after the threshold this already passed.
 pub const HEAD_START_SCORE: i64 = 5000;
+
+/// What the weapon-runs screen says in place of a record while a head start is
+/// still locked: the one thing that opens it.
+pub const HEAD_START_LOCKED: &str = "LOCKED - GET THIS WEAPON IN THE CAMPAIGN";
 
 /// Which of the written runs this is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

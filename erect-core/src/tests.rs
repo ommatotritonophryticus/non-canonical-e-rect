@@ -8736,6 +8736,9 @@ fn a_head_start_ends_as_a_campaign_does_and_is_filed_apart() {
 fn the_written_screen_reaches_the_head_start() {
     use crate::menu::MenuAction;
     let mut game = new_game();
+    for weapon in AttackKind::EVERY {
+        game.settings.unlock_head_start(weapon);
+    }
     game.state = State::Campaigns;
     game.campaign_menu.index = 0;
     let mut right = idle();
@@ -8775,4 +8778,153 @@ fn every_written_mode_files_into_its_own_column() {
         assert!(!seen[kind.index()], "{:?} shares a column", kind);
         seen[kind.index()] = true;
     }
+}
+
+/* ---------------- locking the head start ---------------- */
+
+/// The weapon-runs screen on the head start for `weapon`, with START selected.
+fn head_start_screen(weapon: AttackKind) -> Game {
+    use crate::menu::MenuAction;
+    let mut game = new_game();
+    game.state = State::Campaigns;
+    game.campaign_mode = ModeKind::EVERY
+        .iter()
+        .position(|k| *k == ModeKind::HeadStart)
+        .unwrap();
+    game.campaign_pick = AttackKind::EVERY.iter().position(|k| *k == weapon).unwrap();
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    game.campaign_menu.index = rows
+        .iter()
+        .position(|r| r.action == MenuAction::StartCampaign)
+        .expect("the screen should offer START");
+    game
+}
+
+fn confirm() -> InputFrame {
+    let mut frame = idle();
+    frame.menu.confirm = true;
+    frame
+}
+
+#[test]
+fn every_head_start_is_locked_on_a_fresh_install() {
+    let game = new_game();
+    for weapon in AttackKind::EVERY {
+        assert!(!game.written_open(ModeKind::HeadStart, weapon), "{:?} is open", weapon);
+        assert!(game.written_open(ModeKind::Tutorial, weapon));
+        assert!(game.written_open(ModeKind::Campaign, weapon));
+    }
+}
+
+#[test]
+fn a_locked_head_start_is_greyed_out_says_why_and_does_not_start() {
+    let mut game = head_start_screen(AttackKind::Lunge);
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    let start = &rows[game.campaign_menu.index];
+    assert!(game.row_locked(start), "START should be greyed out");
+    assert!(
+        rows.iter().filter(|r| game.row_locked(r)).count() == 1,
+        "only START is locked; the mode and weapon rows still move"
+    );
+    assert_eq!(game.campaign_status(), crate::campaign::HEAD_START_LOCKED);
+
+    game.tick(&confirm());
+    assert_eq!(game.state, State::Campaigns, "a locked START started something");
+    assert_eq!(game.mode, RunMode::Endless);
+}
+
+#[test]
+fn an_unlocked_head_start_starts_and_shows_its_record() {
+    let mut game = head_start_screen(AttackKind::Lunge);
+    game.settings.unlock_head_start(AttackKind::Lunge);
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    assert!(!game.row_locked(&rows[game.campaign_menu.index]));
+    assert_eq!(game.campaign_status(), "NOT ATTEMPTED");
+    game.tick(&confirm());
+    assert_eq!(game.mode, RunMode::Written(ModeKind::HeadStart, AttackKind::Lunge));
+}
+
+#[test]
+fn the_lock_is_per_weapon() {
+    let mut game = head_start_screen(AttackKind::Hammer);
+    game.settings.unlock_head_start(AttackKind::Lunge);
+    assert_eq!(game.campaign_status(), crate::campaign::HEAD_START_LOCKED);
+}
+
+#[test]
+fn taking_the_weapon_in_a_campaign_opens_its_head_start() {
+    let mut game = campaign_run(AttackKind::Lunge);
+    game.settings.dirty = false;
+    for _ in 0..40 {
+        assert!(
+            !game.settings.head_start_open(AttackKind::Lunge),
+            "opened before the weapon was taken"
+        );
+        next_campaign_offer(&mut game);
+        if game.players[0].attack == AttackKind::Lunge {
+            assert!(game.settings.head_start_open(AttackKind::Lunge));
+            assert!(game.settings.dirty, "the unlock has to be saved");
+            for other in AttackKind::EVERY.iter().filter(|k| **k != AttackKind::Lunge) {
+                assert!(!game.settings.head_start_open(*other), "{:?} opened too", other);
+            }
+            return;
+        }
+    }
+    panic!("the campaign never offered its weapon");
+}
+
+#[test]
+fn the_weapon_a_tutorial_hands_over_does_not_open_it() {
+    let mut game = written_run(ModeKind::Tutorial, AttackKind::Lunge);
+    assert_eq!(game.players[0].attack, AttackKind::Lunge, "the premise");
+    // Through every lull the script has; past the last one the run is over.
+    for _ in 0..crate::campaign::tutorial_steps(AttackKind::Lunge) {
+        next_offer_unpaid(&mut game);
+    }
+    assert_eq!(game.players[0].attack_level, MAX_LEVEL, "the premise: every step was taken");
+    assert!(!game.settings.head_start_open(AttackKind::Lunge));
+}
+
+#[test]
+fn the_weapon_taken_in_an_endless_run_does_not_open_it() {
+    let mut game = new_game();
+    game.start_run(1);
+    settle_on_floor(&mut game);
+    into_the_lull(&mut game);
+    let v = game.viewport;
+    let item = OfferItem::Attack { kind: AttackKind::Lunge, level: 1 };
+    game.offer = Some(Offer::scripted(&v, game.camera_x, v.hper(GROUND_Y_PCT), &[item], game.timer));
+    let body = game.offer.as_ref().unwrap().choices[0].body;
+    wait_for_armed(&mut game);
+    swing_at(&mut game, 0, body);
+    game.tick(&idle());
+    assert_eq!(game.players[0].attack, AttackKind::Lunge, "the premise: it was taken");
+    assert!(!game.settings.head_start_open(AttackKind::Lunge));
+}
+
+#[test]
+fn a_plain_campaign_opens_its_head_start_by_starting() {
+    // The plain swing is never offered: it is in hand from the first frame.
+    let mut game = new_game();
+    game.start_written(ModeKind::Campaign, AttackKind::Basic, 1);
+    assert!(game.settings.head_start_open(AttackKind::Basic));
+}
+
+#[test]
+fn a_cleared_campaign_opens_it_even_without_the_flag() {
+    // A save from before head starts were locked has the record, not the flag.
+    let mut game = new_game();
+    game.settings.record_mode(ModeKind::Campaign, AttackKind::Hammer, 14, 30_000, true);
+    assert!(!game.settings.head_start_unlocked[AttackKind::Hammer.index()]);
+    assert!(game.settings.head_start_open(AttackKind::Hammer));
+}
+
+#[test]
+fn opening_it_again_costs_no_save() {
+    let mut settings = Settings::default();
+    settings.unlock_head_start(AttackKind::Lunge);
+    assert!(settings.dirty);
+    settings.dirty = false;
+    settings.unlock_head_start(AttackKind::Lunge);
+    assert!(!settings.dirty, "nothing changed, nothing to write");
 }

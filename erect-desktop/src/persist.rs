@@ -58,6 +58,11 @@ struct StoredSettings {
     head_start_wave: Vec<i64>,
     #[serde(default)]
     head_start_score: Vec<i64>,
+    /// Which head starts are open, in the same order. Absent in a save from
+    /// before they were locked, which reads as "none" - a cleared campaign
+    /// opens its head start regardless, so nothing earned is lost.
+    #[serde(default)]
+    head_start_unlocked: Vec<bool>,
 }
 
 /// Missing from an older save file means the setting did not exist yet, and
@@ -109,6 +114,9 @@ fn parse(text: &str) -> Settings {
         slot.best_wave = stored.tutorial_wave.get(i).copied().unwrap_or(0);
         slot.best_score = stored.tutorial_score.get(i).copied().unwrap_or(0);
     }
+    for (i, open) in settings.head_start_unlocked.iter_mut().enumerate() {
+        *open = stored.head_start_unlocked.get(i).copied().unwrap_or(false);
+    }
     for (i, slot) in settings.head_start.iter_mut().enumerate() {
         slot.cleared = stored.head_start_cleared.get(i).copied().unwrap_or(false);
         slot.best_wave = stored.head_start_wave.get(i).copied().unwrap_or(0);
@@ -144,6 +152,7 @@ fn encode(settings: &Settings) -> Option<String> {
         head_start_cleared: settings.head_start.iter().map(|c| c.cleared).collect(),
         head_start_wave: settings.head_start.iter().map(|c| c.best_wave).collect(),
         head_start_score: settings.head_start.iter().map(|c| c.best_score).collect(),
+        head_start_unlocked: settings.head_start_unlocked.to_vec(),
     };
     serde_json::to_string(&stored).ok()
 }
@@ -278,12 +287,14 @@ mod tests {
             slot.best_wave = 999;
             slot.best_score = i64::MAX;
         }
+        settings.head_start_unlocked = [true; erect_core::attack::AttackKind::EVERY.len()];
         let text = encode(&settings).expect("settings should encode");
         assert!(text.len() < STORAGE_CAP, "the document is {} bytes", text.len());
         let back = parse(&text);
         assert_eq!(back.campaign, settings.campaign, "and it must survive the trip");
         assert_eq!(back.tutorial, settings.tutorial, "every table of it");
         assert_eq!(back.head_start, settings.head_start, "every table of it");
+        assert_eq!(back.head_start_unlocked, settings.head_start_unlocked, "and the unlocks");
     }
 
     #[test]
@@ -296,6 +307,7 @@ mod tests {
         assert!(settings.campaign.iter().all(|c| !c.cleared && c.best_wave == 0));
         assert!(settings.tutorial.iter().all(|c| !c.cleared && c.best_wave == 0));
         assert!(settings.head_start.iter().all(|c| !c.cleared && c.best_wave == 0));
+        assert!(settings.head_start_unlocked.iter().all(|open| !open));
     }
 
     #[test]

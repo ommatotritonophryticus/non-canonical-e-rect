@@ -3,6 +3,7 @@
 //! A fixed-size binary record rather than JSON: no parser to carry, and a
 //! corrupt or truncated file simply falls back to defaults.
 
+use erect_core::attack::AttackKind;
 use erect_core::settings::Settings;
 use psp::sys::{self, IoOpenFlags};
 
@@ -13,9 +14,18 @@ const PATH: &[u8] = b"settings.dat\0";
 /// For anything that starts the EBOOT without saying where it lives.
 const FALLBACK_PATH: &[u8] = b"ms0:/PSP/GAME/ERECT/settings.dat\0";
 const FALLBACK_DIR: &[u8] = b"ms0:/PSP/GAME/ERECT\0";
-/// Bumped whenever the layout below changes, so old files are ignored.
-const MAGIC: u32 = 0x4552_4303;
-const RECORD_LEN: usize = 4 + 4 + 4 + 8 + 8 + 4 + 4 + 8;
+/// Bumped whenever the layout below changes, so a file is never read with the
+/// wrong one.
+const MAGIC: u32 = 0x4552_4304;
+/// The layout before head starts were locked: the same fields, without the
+/// unlock mask on the end. Still read, so updating keeps records and settings.
+const MAGIC_V3: u32 = 0x4552_4303;
+const RECORD_LEN_V3: usize = 4 + 4 + 4 + 8 + 8 + 4 + 4 + 8;
+/// The current layout: the old record, then one bit per weapon for which head
+/// starts are open, by `AttackKind::index`.
+const RECORD_LEN: usize = RECORD_LEN_V3 + 4;
+// A weapon past the 32nd would have no bit to be saved in.
+const _: () = assert!(AttackKind::EVERY.len() <= 32);
 
 pub fn load() -> Settings {
     let mut settings = Settings::default();
@@ -31,14 +41,22 @@ pub fn load() -> Settings {
         }
         let read = sys::sceIoRead(fd, buf.as_mut_ptr() as *mut _, RECORD_LEN as u32);
         sys::sceIoClose(fd);
-        if read < RECORD_LEN as i32 {
+        let len = match u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) {
+            MAGIC => RECORD_LEN,
+            MAGIC_V3 => RECORD_LEN_V3,
+            _ => return settings,
+        };
+        if read < len as i32 {
             return settings;
+        }
+        if len == RECORD_LEN {
+            let mask = u32::from_le_bytes([buf[44], buf[45], buf[46], buf[47]]);
+            for (i, open) in settings.head_start_unlocked.iter_mut().enumerate() {
+                *open = mask & (1 << i) != 0;
+            }
         }
     }
 
-    if u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) != MAGIC {
-        return settings;
-    }
     settings.players[0].color_index =
         u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
     settings.players[1].color_index =
@@ -69,6 +87,13 @@ pub fn save(settings: &Settings) {
     buf[28..32].copy_from_slice(&settings.music_volume.to_le_bytes());
     buf[32..36].copy_from_slice(&settings.sfx_volume.to_le_bytes());
     buf[36..44].copy_from_slice(&settings.launches.to_le_bytes());
+    let mut mask = 0u32;
+    for (i, open) in settings.head_start_unlocked.iter().enumerate() {
+        if *open {
+            mask |= 1 << i;
+        }
+    }
+    buf[44..48].copy_from_slice(&mask.to_le_bytes());
 
     unsafe {
         let flags = || IoOpenFlags::CREAT | IoOpenFlags::TRUNC | IoOpenFlags::WR_ONLY;

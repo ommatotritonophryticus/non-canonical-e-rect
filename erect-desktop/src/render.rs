@@ -42,6 +42,9 @@ const OFFER_INERT: Color = Color::new(0.42, 0.42, 0.42, 1.0);
 
 /// The dimmed white every hint and secondary line in the game uses.
 const GREY_TEXT: Color = Color::new(0.78, 0.78, 0.78, 1.0);
+/// A menu row that is there but cannot be used yet. Darker than an unselected
+/// row, so it still reads as greyed out with the highlight on it.
+const LOCKED_TEXT: Color = Color::new(0.45, 0.45, 0.45, 1.0);
 
 pub struct Renderer {
     pub font: Font,
@@ -291,7 +294,13 @@ impl Renderer {
             } else {
                 format!("> {} <", row.label)
             };
-            let color = if selected { WHITE } else { GREY_TEXT };
+            let color = if game.row_locked(row) {
+                LOCKED_TEXT
+            } else if selected {
+                WHITE
+            } else {
+                GREY_TEXT
+            };
             let y_pct = menu.row_y_pct(i);
             self.draw_centered_shadowed(v, &label, y_pct, size, color);
 

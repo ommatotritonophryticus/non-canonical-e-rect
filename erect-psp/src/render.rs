@@ -212,7 +212,15 @@ unsafe fn render_menu(game: &Game, menu: &erect_core::menu::Menu) {
             } else {
                 format!("> {} <", row.label)
             };
-            let color = if is_selected { WHITE } else { GREY };
+            // A locked row stays dim with the highlight on it: see the
+            // desktop renderer.
+            let color = if game.row_locked(row) {
+                DIM
+            } else if is_selected {
+                WHITE
+            } else {
+                GREY
+            };
             let y_pct = menu.row_y_pct(i);
             let text_w = crate::font::text_width(&label, size);
             let x = (SCREEN_W as f32 - text_w) / 2.0;

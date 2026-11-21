@@ -60,6 +60,9 @@ pub struct Settings {
     /// starting on wave seven with five thousand in hand makes its waves and
     /// scores a different thing to compare.
     pub head_start: [ModeRecord; AttackKind::EVERY.len()],
+    /// Which weapons have been taken in a campaign, and so have their head
+    /// start open. Filed by [`AttackKind::index`]. Only ever turns on.
+    pub head_start_unlocked: [bool; AttackKind::EVERY.len()],
 }
 
 /// Which of the two volume rows is being adjusted.
@@ -94,6 +97,7 @@ impl Default for Settings {
             tutorial: [ModeRecord::default(); AttackKind::EVERY.len()],
             campaign: [ModeRecord::default(); AttackKind::EVERY.len()],
             head_start: [ModeRecord::default(); AttackKind::EVERY.len()],
+            head_start_unlocked: [false; AttackKind::EVERY.len()],
         }
     }
 }
@@ -156,6 +160,25 @@ impl Settings {
             VolumeChannel::Sfx => self.sfx_volume = stepped,
         }
         self.dirty = true;
+    }
+
+    /// Whether `weapon`'s head start can be played.
+    ///
+    /// A cleared campaign counts as well as the flag: a campaign cannot be
+    /// cleared without taking its weapon, and saves from before head starts
+    /// were locked have the record but not the flag.
+    pub fn head_start_open(&self, weapon: AttackKind) -> bool {
+        self.head_start_unlocked[weapon.index()] || self.campaign[weapon.index()].cleared
+    }
+
+    /// Opens `weapon`'s head start. Marks the settings for saving only when
+    /// that changed something, so taking the weapon again costs no write.
+    pub fn unlock_head_start(&mut self, weapon: AttackKind) {
+        let slot = &mut self.head_start_unlocked[weapon.index()];
+        if !*slot {
+            *slot = true;
+            self.dirty = true;
+        }
     }
 
     /// What one written run for one weapon came to, best of every attempt.
