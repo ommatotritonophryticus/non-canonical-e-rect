@@ -995,11 +995,43 @@ impl Game {
         let count = offer.count;
         let bodies: [Body; crate::offer::OFFER_CHOICES] =
             core::array::from_fn(|i| offer.choices[i].body);
+        // A long swing can cover two boxes at once. Taking the first one in
+        // the array meant taking the leftmost, which facing left is the
+        // farther of the two - the one the player was not swinging at. Of
+        // everything hit, the one taken is the nearest in front of whoever hit
+        // it.
+        let mut best: Option<(usize, (bool, f32))> = None;
         for (i, body) in bodies.iter().take(count).enumerate() {
-            if self.find_attacker(body).is_some() {
-                self.take_offer(i);
-                return;
+            let Some((attacker, _)) = self.find_attacker(body) else {
+                continue;
+            };
+            let order = self.reach_order(attacker, body);
+            if best.is_none_or(|(_, b)| order < b) {
+                best = Some((i, order));
             }
+        }
+        if let Some((i, _)) = best {
+            self.take_offer(i);
+        }
+    }
+
+    /// How near `body` is to player `pi` along the way they are facing, as a
+    /// key that sorts the nearest first.
+    ///
+    /// Anything reaching past the player's middle is in front, at the distance
+    /// to its near edge - so a box the player is standing in is at nothing.
+    /// Anything wholly behind sorts after everything in front, nearest first:
+    /// only a hitbox that covers both sides, the wall's, can reach it at all,
+    /// and then the way the player faces is still the way they meant.
+    fn reach_order(&self, pi: usize, body: &Body) -> (bool, f32) {
+        let p = &self.players[pi];
+        let centre = p.body.x + p.body.w / 2.0;
+        let (left, right) = (body.x - centre, body.x + body.w - centre);
+        let (near, far) = if p.facing_right { (left, right) } else { (-right, -left) };
+        if far >= 0.0 {
+            (false, near.max(0.0))
+        } else {
+            (true, -far)
         }
     }
 

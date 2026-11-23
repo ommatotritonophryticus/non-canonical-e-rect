@@ -9117,3 +9117,77 @@ fn the_first_shield_sets_off_nothing() {
     game.damage_player(0, 40.0, &source, Reach::Normal);
     assert!(game.explosions.iter().all(|e| e.damage == 0.0));
 }
+
+/* ---------------- which box a long swing takes ---------------- */
+
+/// A lull with three boons standing and armed, and player 0 mid-swing the
+/// given way. Returns the swing's box, for the boxes to be laid out in.
+fn mid_swing_in_lull(facing_right: bool) -> (Game, Body) {
+    let mut game = new_game();
+    game.start_run(1);
+    settle_on_floor(&mut game);
+    into_the_lull(&mut game);
+    let v = game.viewport;
+    let items = [
+        OfferItem::Boon(Boon::DoubleJump),
+        OfferItem::Boon(Boon::DashFree),
+        OfferItem::Boon(Boon::Shield),
+    ];
+    game.offer = Some(Offer::scripted(&v, game.camera_x, v.hper(GROUND_Y_PCT), &items, game.timer));
+    // Out of the way while it arms, so nothing is taken early.
+    for i in 0..3 {
+        game.offer.as_mut().unwrap().choices[i].body.x += v.wper(500.0);
+    }
+    wait_for_armed(&mut game);
+
+    let p = &mut game.players[0];
+    p.facing_right = facing_right;
+    p.attack_ticks = p.attack.swing_ticks(ATTACK_TICKS);
+    p.strike_id = p.strike_id.wrapping_add(1).max(1);
+    let wave = game.wave;
+    game.players[0].update_gun(&v, 1.0, wave);
+    let gun = game.players[0].gun;
+    (game, gun)
+}
+
+/// Stands box `i` inside the swing, at `from` of the way along it from its left
+/// edge, a quarter of the swing wide.
+fn stand_in_swing(game: &mut Game, gun: &Body, i: usize, from: f32) {
+    let w = gun.w / 4.0;
+    let body = Body::new(gun.x + (gun.w - w) * from, gun.y, w, gun.h);
+    game.offer.as_mut().unwrap().choices[i].body = body;
+}
+
+fn taken(game: &Game) -> [bool; 3] {
+    let b = game.players[0].boons;
+    [b.double_jump, b.dash_free, b.shield]
+}
+
+#[test]
+fn facing_left_a_long_swing_takes_the_nearer_box_and_not_the_leftmost() {
+    // Box 0 is the far one, at the swing's tip; box 1 is against the player.
+    // Taking the first in the array used to mean taking box 0.
+    let (mut game, gun) = mid_swing_in_lull(false);
+    stand_in_swing(&mut game, &gun, 0, 0.0);
+    stand_in_swing(&mut game, &gun, 1, 1.0);
+    game.tick(&idle());
+    assert_eq!(taken(&game), [false, true, false]);
+    assert!(game.offer.is_none(), "one box taken, the offer is done");
+}
+
+#[test]
+fn facing_right_a_long_swing_takes_the_nearer_box_wherever_it_sits_in_the_list() {
+    let (mut game, gun) = mid_swing_in_lull(true);
+    stand_in_swing(&mut game, &gun, 1, 1.0);
+    stand_in_swing(&mut game, &gun, 2, 0.0);
+    game.tick(&idle());
+    assert_eq!(taken(&game), [false, false, true]);
+}
+
+#[test]
+fn a_swing_that_reaches_one_box_still_takes_it() {
+    let (mut game, gun) = mid_swing_in_lull(false);
+    stand_in_swing(&mut game, &gun, 2, 0.5);
+    game.tick(&idle());
+    assert_eq!(taken(&game), [false, false, true]);
+}
