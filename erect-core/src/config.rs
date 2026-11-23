@@ -205,6 +205,11 @@ pub const FIELD_BOSS_FRACTION: f32 = 1.0 / 7.0;
 /// so this is what the player gives up by taking one.
 pub const COMBO_BLAST_DAMAGE: f32 = 128.0;
 
+/// What the blast from a hit the second-level shield took deals. The same as
+/// the finisher's, so the one blast that hurts enemies always hurts them the
+/// same amount, whoever set it off.
+pub const SHIELD_BLAST_DAMAGE: f32 = COMBO_BLAST_DAMAGE;
+
 /* ---------------- thrown and placed attacks ---------------- */
 
 /// How fast a bullet travels, as a multiple of a walk.

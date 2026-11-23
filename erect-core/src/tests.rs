@@ -5050,19 +5050,26 @@ fn the_dev_menu_can_hand_out_every_upgrade_at_once() {
 #[test]
 fn each_upgrade_can_also_be_set_on_its_own() {
     let mut dev = DevSetup::default();
-    dev.toggle_double_jump();
-    assert!(dev.boons.double_jump);
+    dev.cycle_boon(Boon::DoubleJump, 1);
+    assert!(dev.boons.double_jump && !dev.boons.double_jump_2);
+    assert_eq!(dev.boon_label(Boon::DoubleJump), "1");
     assert!(!dev.boons.dash_free && !dev.boons.shield, "only the one asked for");
     assert!(!dev.all_boons(), "one of four is not all of them");
 
-    dev.toggle_dash_free();
-    dev.toggle_shield();
+    for first in [Boon::DashFree, Boon::Shield] {
+        dev.cycle_boon(first, 1);
+        dev.cycle_boon(first, 1);
+    }
+    dev.cycle_boon(Boon::DoubleJump, 1);
+    assert_eq!(dev.boon_label(Boon::DoubleJump), "2");
     assert!(!dev.all_boons(), "the wall is one of them too");
     dev.cycle_wall(1);
     assert!(dev.all_boons());
 
-    dev.toggle_double_jump();
-    assert!(!dev.boons.double_jump, "a switch goes both ways");
+    dev.cycle_boon(Boon::DoubleJump, 1);
+    assert!(!dev.boons.double_jump && !dev.boons.double_jump_2, "past 2 it wraps to off");
+    dev.cycle_boon(Boon::DoubleJump, -1);
+    assert_eq!(dev.boon_label(Boon::DoubleJump), "2", "and left goes the other way");
 }
 
 #[test]
@@ -5812,7 +5819,7 @@ fn a_hazard_reaches_through_a_dash_and_nothing_else() {
 
 #[test]
 fn boons_belong_to_a_run_and_not_to_a_death_between_waves() {
-    let all = Boons { double_jump: true, dash_free: true, shield: true, wall: WallMod::Plain };
+    let all = Boons { wall: WallMod::Plain, ..Boons::ALL_HELD };
     let mut game = player_with(all);
     let v = game.viewport;
 
@@ -5850,12 +5857,7 @@ fn a_drained_pool_has_only_the_wall_swap_left() {
     // swallows a roster.
     let v = Viewport::new(1280.0, 800.0);
     let mut rng = Rng::new(4242);
-    let all = Boons {
-        double_jump: true,
-        dash_free: true,
-        shield: true,
-        wall: WallMod::Push,
-    };
+    let all = Boons { wall: WallMod::Push, ..Boons::ALL_HELD };
     let mut weapons = 0;
     let mut boons = 0;
     for _ in 0..200 {
@@ -5880,14 +5882,18 @@ fn every_boon_can_come_up() {
     let mut rng = Rng::new(777);
     let mut seen = [false; Boon::ALL.len()];
     let mut saw_weapon = false;
-    for _ in 0..2000 {
+    // Half the rolls holding every first level, since a second level is only
+    // offered on top of its first.
+    let firsts = Boons { double_jump: true, dash_free: true, shield: true, ..Default::default() };
+    for roll in 0..2000 {
+        let held = if roll % 2 == 0 { Boons::default() } else { firsts };
         let offer = Offer::roll(
             &v,
             0.0,
             700.0,
             AttackKind::Basic,
             1,
-            Boons::default(),
+            held,
             1,
             WaveRule::Normal,
             0,
@@ -6160,12 +6166,7 @@ fn the_two_walls_replace_each_other() {
 fn holding_one_wall_leaves_the_other_on_the_table() {
     let v = Viewport::new(1280.0, 800.0);
     let mut rng = Rng::new(9001);
-    let held = Boons {
-        double_jump: true,
-        dash_free: true,
-        shield: true,
-        wall: WallMod::Pull,
-    };
+    let held = Boons::ALL_HELD;
     let mut saw_push = false;
     for _ in 0..500 {
         let offer = Offer::roll(&v, 0.0, 700.0, AttackKind::Basic, 1, held, 1, WaveRule::Normal, 0, &mut rng);
@@ -7575,12 +7576,7 @@ fn a_campaign_pool_narrows_but_never_empties() {
     let game = new_game();
     let v = game.viewport;
     let ground = v.hper(GROUND_Y_PCT);
-    let held = Boons {
-        double_jump: true,
-        dash_free: true,
-        shield: true,
-        wall: WallMod::Pull,
-    };
+    let held = Boons::ALL_HELD;
     let mut rng = Rng::new(7);
     let offer = Offer::roll_campaign(
         &v,
@@ -8304,12 +8300,7 @@ fn a_campaign_still_hands_its_own_weapon_over_at_level_one() {
     // Every boon already held, so the pool is the weapon and the wall it is
     // not carrying - small enough that both stand and neither can be shuffled
     // out of the three boxes.
-    let held = Boons {
-        double_jump: true,
-        dash_free: true,
-        shield: true,
-        wall: WallMod::Pull,
-    };
+    let held = Boons::ALL_HELD;
     let offer = Offer::roll_campaign(
         &v,
         0.0,
@@ -8927,4 +8918,202 @@ fn opening_it_again_costs_no_save() {
     settings.dirty = false;
     settings.unlock_head_start(AttackKind::Lunge);
     assert!(!settings.dirty, "nothing changed, nothing to write");
+}
+
+/* ---------------- second levels of the boons ---------------- */
+
+/// Up off the floor with the air jump already spent.
+fn airborne_with_no_air_jump(boons: Boons) -> Game {
+    let mut game = player_with(boons);
+    clear_arena(&mut game);
+    game.tick(&jump_intent());
+    for _ in 0..5 {
+        game.tick(&idle());
+    }
+    game.tick(&jump_intent());
+    assert!(!game.players[0].grounded, "the premise: in the air");
+    assert_eq!(game.players[0].air_jumps, 0, "the premise: the air jump is spent");
+    game
+}
+
+fn double_jump(level: u8) -> Boons {
+    let mut boons = Boons::default();
+    boons.set_level(Boon::DoubleJump, level);
+    boons
+}
+
+/// A blast laid over the player, as one landing on them would be.
+fn blast_on_player(game: &mut Game) {
+    let v = game.viewport;
+    let mut blast = Explosion::new(0.0, 0.0, &v);
+    blast.body = game.players[0].body;
+    game.explosions.push(blast);
+}
+
+#[test]
+fn a_second_level_is_only_offered_on_top_of_its_first() {
+    let v = Viewport::new(1280.0, 800.0);
+    let mut rng = Rng::new(2024);
+    for _ in 0..500 {
+        let offer = Offer::roll(&v, 0.0, 700.0, AttackKind::Basic, 1, Boons::default(), 1, WaveRule::Normal, 0, &mut rng);
+        for choice in offer.choices.iter().take(offer.count) {
+            if let OfferItem::Boon(boon) = choice.item {
+                assert!(boon.requires().is_none(), "{boon:?} was offered before its first level");
+            }
+        }
+    }
+    let firsts = Boons { double_jump: true, dash_free: true, shield: true, ..Default::default() };
+    for second in [Boon::DoubleJump2, Boon::DashFree2, Boon::Shield2] {
+        assert!(!Boons::default().can_take(second));
+        assert!(firsts.can_take(second));
+    }
+}
+
+#[test]
+fn a_second_level_says_what_it_adds_and_a_first_does_not() {
+    assert_eq!(Boon::DoubleJump2.label(), "DOUBLE JUMP 2");
+    assert_eq!(Boon::DashFree2.label(), "FREE DASH 2");
+    assert_eq!(Boon::Shield2.label(), "SHIELD 2");
+    for boon in Boon::ALL {
+        assert_eq!(boon.role().is_empty(), boon.requires().is_none(), "{boon:?}");
+    }
+}
+
+#[test]
+fn carrying_everything_means_both_levels() {
+    let firsts = Boons {
+        double_jump: true,
+        dash_free: true,
+        shield: true,
+        wall: WallMod::Pull,
+        ..Default::default()
+    };
+    assert!(!firsts.full(), "the second levels are still on the table");
+    assert!(Boons::ALL_HELD.full());
+}
+
+#[test]
+fn the_second_double_jump_comes_back_on_a_hit() {
+    let mut game = airborne_with_no_air_jump(double_jump(2));
+    let source = Body::new(0.0, 0.0, 10.0, 10.0);
+    game.damage_player(0, 10.0, &source, Reach::Normal);
+    assert_eq!(game.players[0].air_jumps, 1);
+}
+
+#[test]
+fn the_second_double_jump_comes_back_on_a_hit_the_shield_takes() {
+    let mut boons = double_jump(2);
+    boons.shield = true;
+    let mut game = airborne_with_no_air_jump(boons);
+    let full = game.players[0].hp;
+    let source = Body::new(0.0, 0.0, 10.0, 10.0);
+    game.damage_player(0, 10.0, &source, Reach::Normal);
+    assert_eq!(game.players[0].hp, full, "the premise: the shield took it");
+    assert_eq!(game.players[0].air_jumps, 1);
+}
+
+#[test]
+fn the_second_double_jump_comes_back_in_a_blast() {
+    let mut game = airborne_with_no_air_jump(double_jump(2));
+    blast_on_player(&mut game);
+    game.tick(&idle());
+    assert_eq!(game.players[0].air_jumps, 1);
+}
+
+#[test]
+fn the_first_double_jump_waits_for_the_floor_as_before() {
+    let mut game = airborne_with_no_air_jump(double_jump(1));
+    let source = Body::new(0.0, 0.0, 10.0, 10.0);
+    game.damage_player(0, 10.0, &source, Reach::Normal);
+    blast_on_player(&mut game);
+    game.tick(&idle());
+    assert_eq!(game.players[0].air_jumps, 0, "only landing gives it back at level one");
+}
+
+#[test]
+fn being_untouchable_does_not_give_the_jump_back() {
+    // Nothing landed, so nothing is handed back.
+    let mut game = airborne_with_no_air_jump(double_jump(2));
+    game.players[0].invulnerable = true;
+    let source = Body::new(0.0, 0.0, 10.0, 10.0);
+    game.damage_player(0, 10.0, &source, Reach::Normal);
+    assert_eq!(game.players[0].air_jumps, 0);
+}
+
+#[test]
+fn the_second_free_dash_costs_a_fifth() {
+    let mut game = new_game();
+    ready_to_dash(&mut game);
+    clear_arena(&mut game);
+    game.players[0].boons = Boons { dash_free: true, dash_free_2: true, ..Default::default() };
+
+    let needed = game.players[0].energy_needed(game.wave);
+    let before = game.players[0].energy;
+    let divisor = DASH_COST_DIVISOR * crate::boon::DASH_FREE_2_DISCOUNT;
+    game.tick(&dash_input());
+    assert!(game.players[0].dashing());
+    assert_eq!(before - game.players[0].energy, (needed + divisor - 1) / divisor);
+    assert!(
+        (needed + divisor - 1) / divisor * 5 <= (needed + 2) / 3 + 4,
+        "a fifth of the plain price, give or take the rounding"
+    );
+}
+
+#[test]
+fn the_first_free_dash_still_pays_full_energy() {
+    let mut game = new_game();
+    ready_to_dash(&mut game);
+    clear_arena(&mut game);
+    game.players[0].boons = Boons { dash_free: true, ..Default::default() };
+    let needed = game.players[0].energy_needed(game.wave);
+    let before = game.players[0].energy;
+    game.tick(&dash_input());
+    assert_eq!(before - game.players[0].energy, (needed + 2) / 3);
+}
+
+#[test]
+fn the_second_shield_turns_the_hit_into_a_blast() {
+    let mut game = player_with(Boons { shield: true, shield_2: true, ..Default::default() });
+    clear_arena(&mut game);
+    let full = game.players[0].hp;
+    let source = Body::new(0.0, 0.0, 10.0, 10.0);
+    game.damage_player(0, 40.0, &source, Reach::Normal);
+    assert_eq!(game.players[0].hp, full, "the shield still takes the hit");
+    let blast = game.explosions.last().expect("the hit should have gone off");
+    assert_eq!(blast.damage, SHIELD_BLAST_DAMAGE);
+    assert_eq!(blast.owner, Some(0), "what it kills is the player's");
+
+    // The shield is down now, so the next hit lands and sets off nothing.
+    let blasts = game.explosions.len();
+    game.damage_player(0, 40.0, &source, Reach::Normal);
+    assert_eq!(game.explosions.len(), blasts);
+}
+
+#[test]
+fn the_second_shield_blast_hurts_what_stands_near() {
+    let mut game = player_with(Boons { shield: true, shield_2: true, ..Default::default() });
+    clear_arena(&mut game);
+    let v = game.viewport;
+    let mut z = Zombie::from_edge(&v, &mut game.rng, TEST_ENEMY_COLOR);
+    z.body.x = game.players[0].body.x + v.wper(3.0);
+    z.body.y = game.players[0].body.y;
+    z.hp = 1000.0;
+    z.hpmax = 1000.0;
+    game.zombies.push(z);
+    let source = game.zombies[0].body;
+    game.damage_player(0, 40.0, &source, Reach::Normal);
+    for _ in 0..20 {
+        game.tick(&idle());
+    }
+    let hp = game.zombies.first().map(|z| z.hp).unwrap_or(f32::MIN);
+    assert!(hp <= 1000.0 - SHIELD_BLAST_DAMAGE, "the blast should have bitten: hp {hp}");
+}
+
+#[test]
+fn the_first_shield_sets_off_nothing() {
+    let mut game = player_with(Boons { shield: true, ..Default::default() });
+    clear_arena(&mut game);
+    let source = Body::new(0.0, 0.0, 10.0, 10.0);
+    game.damage_player(0, 40.0, &source, Reach::Normal);
+    assert!(game.explosions.iter().all(|e| e.damage == 0.0));
 }

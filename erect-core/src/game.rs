@@ -11,7 +11,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::attack::AttackKind;
-use crate::boon::{WallMod, SHIELD_COOLDOWN_TICKS};
+use crate::boon::{Boon, WallMod, DASH_FREE_2_DISCOUNT, SHIELD_COOLDOWN_TICKS};
 use crate::attack::MAX_LEVEL;
 use crate::campaign::{self, ModeKind};
 use crate::audio::{AudioEvent, AudioQueue, MusicState, Situation};
@@ -1068,8 +1068,15 @@ impl Game {
     /// discount it.
     fn pay_for_dash(&mut self, i: usize) -> bool {
         let needed = self.players[i].energy_needed(self.wave);
+        // The second level of the free dash cuts the price, not the bar: the
+        // divisor grows, so the ceiling below still never rounds it to free.
+        let divisor = if self.players[i].boons.dash_free_2 {
+            DASH_COST_DIVISOR * DASH_FREE_2_DISCOUNT
+        } else {
+            DASH_COST_DIVISOR
+        };
         // Integer ceiling, so a third of a bar is never rounded down to free.
-        let cost = ((needed + DASH_COST_DIVISOR - 1) / DASH_COST_DIVISOR).max(1);
+        let cost = ((needed + divisor - 1) / divisor).max(1);
 
         if self.players[i].energy >= cost {
             self.players[i].energy -= cost;
@@ -1122,14 +1129,46 @@ impl Game {
         // spends it - a shield is for the hits that would otherwise get through. The throw still happens: being shielded should
         // not also mean being immovable, and the throw is what carries the
         // player out of reach of the next one.
+        // Past this point the hit has landed - on the shield or on the player
+        // - and the second level of the double jump hands the air jump back,
+        // so a hit that throws the player up does not also leave them stranded
+        // there.
+        if self.players[pi].boons.double_jump_2 {
+            self.players[pi].air_jumps = 1;
+        }
         if self.players[pi].boons.shield && self.timer >= self.players[pi].shield_ready_at {
             self.players[pi].shield_ready_at = self.timer + SHIELD_COOLDOWN_TICKS;
+            if self.players[pi].boons.shield_2 {
+                self.shield_blast(pi);
+            }
             self.knock_back(pi, source);
             return false;
         }
         self.players[pi].hp -= amount * self.waves.rule.damage_scale();
         self.knock_back(pi, source);
         self.players[pi].hp < 0.0 && self.down_player(pi)
+    }
+
+    /// The second level of the shield: the hit it takes goes off around the
+    /// player as a blast that hurts what is near, paid to them like any kill.
+    ///
+    /// The same blast the plain attack's finisher leaves, at the same damage,
+    /// so it reads as something the player already knows. It bounces the
+    /// player as every blast does, which is part of the point: the throw from
+    /// the hit and the lift from the blast both carry them clear.
+    fn shield_blast(&mut self, pi: usize) {
+        let body = self.players[pi].body;
+        let strike = self.take_strike();
+        let v = self.viewport;
+        self.explosions.push(Explosion::lethal(
+            body.x + body.w / 2.0,
+            body.y + body.h / 2.0,
+            &v,
+            SHIELD_BLAST_DAMAGE,
+            strike,
+            pi,
+        ));
+        self.audio.push(AudioEvent::Slam);
     }
 
     /// A modified wall takes hold of the whole field the moment it goes up.
@@ -1412,17 +1451,17 @@ impl Game {
                     swatch: None,
                 },
                 MenuRow {
-                    label: format!("DOUBLE JUMP: {}", Self::on_off(self.dev.boons.double_jump)),
+                    label: format!("DOUBLE JUMP: {}", self.dev.boon_label(Boon::DoubleJump)),
                     action: MenuAction::AdjustDevDoubleJump,
                     swatch: None,
                 },
                 MenuRow {
-                    label: format!("FREE DASH: {}", Self::on_off(self.dev.boons.dash_free)),
+                    label: format!("FREE DASH: {}", self.dev.boon_label(Boon::DashFree)),
                     action: MenuAction::AdjustDevDashFree,
                     swatch: None,
                 },
                 MenuRow {
-                    label: format!("SHIELD: {}", Self::on_off(self.dev.boons.shield)),
+                    label: format!("SHIELD: {}", self.dev.boon_label(Boon::Shield)),
                     action: MenuAction::AdjustDevShield,
                     swatch: None,
                 },
@@ -1612,9 +1651,9 @@ impl Game {
             // Left and right do the same thing on a switch; there is no
             // direction to a yes or a no.
             Some(MenuAction::AdjustDevAllBoons) => self.dev.toggle_all_boons(),
-            Some(MenuAction::AdjustDevDoubleJump) => self.dev.toggle_double_jump(),
-            Some(MenuAction::AdjustDevDashFree) => self.dev.toggle_dash_free(),
-            Some(MenuAction::AdjustDevShield) => self.dev.toggle_shield(),
+            Some(MenuAction::AdjustDevDoubleJump) => self.dev.cycle_boon(Boon::DoubleJump, dir),
+            Some(MenuAction::AdjustDevDashFree) => self.dev.cycle_boon(Boon::DashFree, dir),
+            Some(MenuAction::AdjustDevShield) => self.dev.cycle_boon(Boon::Shield, dir),
             Some(MenuAction::AdjustDevWall) => self.dev.cycle_wall(dir),
             Some(MenuAction::AdjustCampaignWeapon) => {
                 let n = AttackKind::EVERY.len() as i32;
@@ -1653,9 +1692,9 @@ impl Game {
             Some(MenuAction::AdjustDevAttack) => self.dev.cycle_attack(1),
             Some(MenuAction::AdjustDevAttackLevel) => self.dev.adjust_attack_level(1),
             Some(MenuAction::AdjustDevAllBoons) => self.dev.toggle_all_boons(),
-            Some(MenuAction::AdjustDevDoubleJump) => self.dev.toggle_double_jump(),
-            Some(MenuAction::AdjustDevDashFree) => self.dev.toggle_dash_free(),
-            Some(MenuAction::AdjustDevShield) => self.dev.toggle_shield(),
+            Some(MenuAction::AdjustDevDoubleJump) => self.dev.cycle_boon(Boon::DoubleJump, 1),
+            Some(MenuAction::AdjustDevDashFree) => self.dev.cycle_boon(Boon::DashFree, 1),
+            Some(MenuAction::AdjustDevShield) => self.dev.cycle_boon(Boon::Shield, 1),
             Some(MenuAction::AdjustDevWall) => self.dev.cycle_wall(1),
             Some(MenuAction::AdjustCampaignWeapon) => {
                 let n = AttackKind::EVERY.len() as i32;
@@ -2132,6 +2171,11 @@ impl Game {
             for e in 0..self.explosions.len() {
                 if self.players[i].body.intersects(&self.explosions[e].body) {
                     self.players[i].ay = -v.hper(2.0);
+                    // Lifted by a blast, and handed the air jump back to do
+                    // something with the height.
+                    if self.players[i].boons.double_jump_2 {
+                        self.players[i].air_jumps = 1;
+                    }
                 }
             }
             self.players[i].body.y += self.players[i].ay;

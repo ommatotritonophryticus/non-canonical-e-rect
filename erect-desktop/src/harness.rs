@@ -250,11 +250,11 @@ impl Harness {
         shots.sort_by_key(|(at, _)| *at);
         if boons || wall != erect_core::boon::WallMod::Plain {
             for p in game.players.iter_mut() {
-                p.boons = erect_core::boon::Boons {
-                    double_jump: boons,
-                    dash_free: boons,
-                    shield: boons,
-                    wall,
+                // `boons` is every boon at both levels; the wall is its own key.
+                p.boons = if boons {
+                    erect_core::boon::Boons { wall, ..erect_core::boon::Boons::ALL_HELD }
+                } else {
+                    erect_core::boon::Boons { wall, ..Default::default() }
                 };
                 // A wall to actually raise, since nothing here earns one.
                 p.super_charges = 9;

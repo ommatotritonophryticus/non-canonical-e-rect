@@ -51,7 +51,7 @@ fn spread(count: usize) -> &'static [f32] {
 ///
 /// Weapons and boons share the pool rather than alternating. A boon is the
 /// safer pick whenever one is on the table - it is kept, and it costs no level
-/// - but there are only three of them and a taken one never returns, so the
+/// - but there are only a few of them and a taken one never returns, so the
 /// pool drains back to weapons on its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OfferItem {
@@ -104,9 +104,10 @@ impl OfferChoice {
 
     /// The line under the name: what this option is for.
     ///
-    /// Empty for a boon, whose own name already says it - `DOUBLE JUMP` needs
-    /// no gloss, and a second line under every option would be three lines of
-    /// text across the field rather than three words.
+    /// Empty for a first-level boon, whose own name already says it -
+    /// `DOUBLE JUMP` needs no gloss, and a second line under every option would
+    /// be three lines of text across the field rather than three words. A
+    /// second level's name only says "more", so it gets one word for what.
     pub fn role(&self) -> &'static str {
         match self.item {
             // The last level is where a weapon stops being more of itself and
@@ -114,7 +115,7 @@ impl OfferChoice {
             // that is not a number.
             OfferItem::Attack { level, .. } if level >= MAX_LEVEL => "MASTER",
             OfferItem::Attack { kind, .. } => kind.role(),
-            OfferItem::Boon(_) => "",
+            OfferItem::Boon(boon) => boon.role(),
             // Said on every one of them, because the thing a player has to
             // know about a modifier is that it is not kept.
             OfferItem::Rule(_) => "THIS WAVE",
@@ -190,7 +191,7 @@ impl Offer {
     /// The pool is every weapon they are not holding, plus one more level of
     /// the one they are - so a run can deepen a weapon instead of only swapping
     /// it, and a maxed-out weapon quietly stops being offered - plus every boon
-    /// not already taken.
+    /// that can still be taken.
     #[allow(clippy::too_many_arguments)]
     pub fn roll(
         v: &Viewport,
@@ -377,8 +378,10 @@ fn build_pool(
             }
         }
     }
+    // A second level only once its first is held, so the two never stand side
+    // by side and a level is never skipped.
     for boon in Boon::ALL {
-        if !held.has(boon) {
+        if held.can_take(boon) {
             pool[n] = OfferItem::Boon(boon);
             n += 1;
         }

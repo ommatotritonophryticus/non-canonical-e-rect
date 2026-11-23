@@ -7,7 +7,7 @@
 //! did not go looking for it.
 
 use crate::attack::{AttackKind, MAX_LEVEL};
-use crate::boon::{Boons, WallMod};
+use crate::boon::{Boon, Boons, WallMod};
 use crate::waves::{WaveKind, WaveRule};
 
 /// Score moves in steps this size. A run worth of score is thousands of points,
@@ -115,16 +115,20 @@ impl DevSetup {
         self.attack_level = level as u8;
     }
 
-    pub fn toggle_double_jump(&mut self) {
-        self.boons.double_jump = !self.boons.double_jump;
+    /// Steps one of the two-level boons through off, 1 and 2, wrapping. Named
+    /// by its first level.
+    pub fn cycle_boon(&mut self, first: Boon, dir: i32) {
+        let level = self.boons.level(first) as usize;
+        self.boons.set_level(first, step(level, dir, 3) as u8);
     }
 
-    pub fn toggle_dash_free(&mut self) {
-        self.boons.dash_free = !self.boons.dash_free;
-    }
-
-    pub fn toggle_shield(&mut self) {
-        self.boons.shield = !self.boons.shield;
+    /// One of the two-level boons as its menu row prints it.
+    pub fn boon_label(&self, first: Boon) -> &'static str {
+        match self.boons.level(first) {
+            0 => "OFF",
+            1 => "1",
+            _ => "2",
+        }
     }
 
     pub fn cycle_wall(&mut self, dir: i32) {
@@ -134,10 +138,7 @@ impl DevSetup {
 
     /// True when the run would start holding everything there is.
     pub fn all_boons(&self) -> bool {
-        self.boons.double_jump
-            && self.boons.dash_free
-            && self.boons.shield
-            && self.boons.wall != WallMod::Plain
+        self.boons.full()
     }
 
     /// Every boon at once, or none. What "set all the upgrades" means when it
@@ -147,12 +148,7 @@ impl DevSetup {
         self.boons = if self.all_boons() {
             Boons::default()
         } else {
-            Boons {
-                double_jump: true,
-                dash_free: true,
-                shield: true,
-                wall: WallMod::Pull,
-            }
+            Boons::ALL_HELD
         };
     }
 
