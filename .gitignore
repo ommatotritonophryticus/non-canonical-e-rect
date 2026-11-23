@@ -41,3 +41,7 @@ android/debug.keystore
 # macOS
 .DS_Store
 
+
+# Local scratch files in the repository root, not part of the project.
+/project.txt
+/collect.py
