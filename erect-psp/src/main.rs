@@ -4,8 +4,10 @@
 //! build runs. This crate only supplies the platform: sceGu drawing, sceCtrl
 //! input, and Memory Stick saves.
 //!
-//! One tick per vblank. The PSP refreshes at ~60 Hz, which is exactly the rate
-//! the core's constants are tuned for, so no accumulator is needed here.
+//! One tick per vblank at full speed. The PSP refreshes at ~60 Hz, which is
+//! exactly the rate the core's constants are tuned for. A slowed world - see
+//! `Game::time_scale` - banks a fraction of a tick per vblank instead, and
+//! steps when a whole one has built up.
 
 #![no_std]
 #![no_main]
@@ -24,6 +26,7 @@ mod sound;
 
 use erect_core::game::Game;
 use erect_core::geom::Viewport;
+use erect_core::input::InputFrame;
 use psp::sys;
 
 psp::module!("erect", 1, 0);
@@ -83,9 +86,32 @@ fn psp_main() {
     #[cfg(feature = "screenshot")]
     let mut frame_no: u32 = 0;
 
+    // Fractions of a tick banked across vblanks, for a world running at less
+    // than full speed. At full speed every vblank adds exactly one.
+    let mut clock = 0.0f32;
+    // Presses no tick has taken yet. A slowed world skips vblanks, and an edge
+    // landing on one of those would otherwise be lost.
+    let mut pending = InputFrame::default();
+
     loop {
-        let frame = unsafe { pad.read() };
-        game.tick(&frame);
+        let mut frame = unsafe { pad.read() };
+        frame.merge(&pending);
+        clock += game.time_scale();
+        let mut ticked = false;
+        while clock >= 1.0 {
+            game.tick(&frame);
+            clock -= 1.0;
+            if !ticked {
+                // One-shot intents belong to exactly one tick.
+                frame.clear_edges();
+                ticked = true;
+            }
+        }
+        pending = if ticked {
+            InputFrame::default()
+        } else {
+            frame.edges_only()
+        };
 
         if has_sound {
             sound::set_roll(game.audio_roll);

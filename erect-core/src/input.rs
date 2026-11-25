@@ -46,6 +46,45 @@ pub struct InputFrame {
 }
 
 impl InputFrame {
+    /// Folds a second source of intents into this one. Nothing is exclusive:
+    /// a keyboard and a drawn pad, or this frame and presses an earlier frame
+    /// raised that no tick has taken yet, simply add up.
+    pub fn merge(&mut self, from: &InputFrame) {
+        for (dst, src) in self.players.iter_mut().zip(from.players.iter()) {
+            dst.left |= src.left;
+            dst.right |= src.right;
+            dst.jump |= src.jump;
+            dst.slam |= src.slam;
+            dst.attack |= src.attack;
+            dst.attack_held |= src.attack_held;
+            dst.dash |= src.dash;
+        }
+        self.menu.up |= from.menu.up;
+        self.menu.down |= from.menu.down;
+        self.menu.left |= from.menu.left;
+        self.menu.right |= from.menu.right;
+        self.menu.confirm |= from.menu.confirm;
+        self.menu.back |= from.menu.back;
+        self.pause |= from.pause;
+        self.dev_menu |= from.dev_menu;
+    }
+
+    /// The one-shot half of a frame, with the held half dropped.
+    ///
+    /// For a rendered frame that ran no tick - which a slowed world does more
+    /// often than not. Held state is re-read every frame and must not be
+    /// carried; edges are the opposite - they happen once and have to survive
+    /// until a tick can take them.
+    pub fn edges_only(&self) -> InputFrame {
+        let mut kept = *self;
+        for p in kept.players.iter_mut() {
+            p.left = false;
+            p.right = false;
+            p.attack_held = false;
+        }
+        kept
+    }
+
     /// One-shot intents must fire on exactly one simulation tick, even when a
     /// rendered frame ran several of them.
     pub fn clear_edges(&mut self) {

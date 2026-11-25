@@ -47,43 +47,6 @@ fn window_conf() -> Conf {
     }
 }
 
-/// Folds a second source of intents into the first. Nothing is exclusive: a
-/// browser build on a laptop can be played with the keyboard and the drawn pad
-/// at the same time, and neither has to know about the other.
-fn merge(into: &mut InputFrame, from: &InputFrame) {
-    for (dst, src) in into.players.iter_mut().zip(from.players.iter()) {
-        dst.left |= src.left;
-        dst.right |= src.right;
-        dst.jump |= src.jump;
-        dst.slam |= src.slam;
-        dst.attack |= src.attack;
-        dst.attack_held |= src.attack_held;
-        dst.dash |= src.dash;
-    }
-    into.menu.up |= from.menu.up;
-    into.menu.down |= from.menu.down;
-    into.menu.left |= from.menu.left;
-    into.menu.right |= from.menu.right;
-    into.menu.confirm |= from.menu.confirm;
-    into.menu.back |= from.menu.back;
-    into.pause |= from.pause;
-    into.dev_menu |= from.dev_menu;
-}
-
-/// The one-shot half of a frame, with the held half dropped.
-///
-/// Held state is re-read every frame and must not be carried; edges are the
-/// opposite - they happen once and have to survive until a tick can take them.
-fn edges_only(frame: &InputFrame) -> InputFrame {
-    let mut kept = *frame;
-    for p in kept.players.iter_mut() {
-        p.left = false;
-        p.right = false;
-        p.attack_held = false;
-    }
-    kept
-}
-
 /// Anything at all from the player, for the one moment the game needs to know
 /// only that something happened.
 #[cfg(target_arch = "wasm32")]
@@ -236,15 +199,18 @@ async fn main() {
         if dt > 0.25 {
             dt = 0.25;
         }
-        accumulator += dt;
+        // Scaled by however fast the world is meant to run: a slowed game is
+        // fed less time and so takes fewer ticks, nothing more. Read before the
+        // ticks, from where the last frame left things.
+        accumulator += dt * game.time_scale() as f64;
 
         let mut frame = reader.read(&game.player_schemes());
         if phone_layout {
             let touched = pad.read();
-            merge(&mut frame, &touched);
+            frame.merge(&touched);
         }
         // Anything the last frame raised but no tick consumed.
-        merge(&mut frame, &pending);
+        frame.merge(&pending);
         let pads = frame.pads_connected;
 
         let mut ticked = false;
@@ -267,7 +233,7 @@ async fn main() {
         pending = if ticked {
             InputFrame::default()
         } else {
-            edges_only(&frame)
+            frame.edges_only()
         };
 
         #[cfg(not(target_arch = "wasm32"))]

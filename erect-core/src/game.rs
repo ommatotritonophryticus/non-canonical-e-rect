@@ -422,6 +422,65 @@ impl Game {
     /// for [`BLIND_GLIMPSE_TICKS`] every [`BLIND_GLIMPSE_EVERY`]. Decided here
     /// rather than in each renderer so both platforms blink together; two
     /// answers to the same question would be two different waves.
+    /// How fast the world should run right now, as a multiple of normal.
+    ///
+    /// Any positive value is honoured: the frontends feed the simulation this
+    /// much of the time that actually passed, so 0.5 is half speed and 2.0 is
+    /// double. The core still steps in whole ticks of [`TICK_SECONDS`] - a
+    /// slowed world takes the same steps, just fewer of them a second - so
+    /// nothing inside it has to know.
+    ///
+    /// Today the one thing that moves it is the piercing attack: the nearest
+    /// enemy inside the reach of a player holding it slows everything down, see
+    /// [`Self::pierce_focus`]. Only while a run is being played; menus, the
+    /// pause screen and the result always run at full speed.
+    pub fn time_scale(&self) -> f32 {
+        if self.state != State::Playing {
+            return 1.0;
+        }
+        self.players
+            .iter()
+            .filter(|p| !p.dead && p.attack == AttackKind::Piercing)
+            .map(|p| self.pierce_focus(p))
+            .fold(1.0, f32::min)
+    }
+
+    /// The slowdown one piercing player asks for: full speed with nothing in
+    /// reach, falling in a straight line to [`PIERCE_SLOW_MIN`] as the nearest
+    /// enemy in reach closes to nothing.
+    ///
+    /// Reach is the box an ordinary swing would put out in front of the player,
+    /// whether or not they are swinging - it is the enemy being *in reach* that
+    /// counts, not being hit. The gap is measured from the player's side of the
+    /// box to the enemy's near edge, so the far end of the reach is full speed
+    /// and touching is the slowest.
+    fn pierce_focus(&self, p: &Player) -> f32 {
+        let v = self.viewport;
+        let zone = p.projected_swing(&v, self.waves.rule.gun_reach(), self.wave, 1.0);
+        if zone.w <= 0.0 {
+            return 1.0;
+        }
+        let nearest = self
+            .zombies
+            .iter()
+            .map(|z| &z.body)
+            .chain(self.flyers.iter().map(|f| &f.body))
+            .filter(|body| body.intersects(&zone))
+            .map(|body| {
+                let gap = if p.facing_right {
+                    body.x - zone.x
+                } else {
+                    zone.x + zone.w - (body.x + body.w)
+                };
+                gap.clamp(0.0, zone.w)
+            })
+            .fold(None, |acc: Option<f32>, gap| Some(acc.map_or(gap, |a| a.min(gap))));
+        match nearest {
+            Some(gap) => PIERCE_SLOW_MIN + (1.0 - PIERCE_SLOW_MIN) * gap / zone.w,
+            None => 1.0,
+        }
+    }
+
     pub fn enemies_visible(&self) -> bool {
         if self.waves.rule != WaveRule::Hidden {
             return true;

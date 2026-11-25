@@ -182,6 +182,12 @@ pub const GUN_EXTRA_MAX_PCT: f32 = 25.0;
 /// aiming meaningless.
 pub const GUN_MAX_REACH_PCT: f32 = 60.0;
 
+/// How slow the world gets for a player holding the piercing attack, at the
+/// closest: an enemy right up against them runs the game at this fraction of
+/// its speed. At the far end of their reach it is full speed again, and in
+/// between it is a straight line - see [`crate::game::Game::time_scale`].
+pub const PIERCE_SLOW_MIN: f32 = 0.25;
+
 /// What one wall takes off anything that is not a boss.
 ///
 /// Flat, and just past the 255 every ordinary enemy carries, so the wall still

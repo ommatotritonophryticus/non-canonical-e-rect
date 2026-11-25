@@ -9191,3 +9191,129 @@ fn a_swing_that_reaches_one_box_still_takes_it() {
     game.tick(&idle());
     assert_eq!(taken(&game), [false, false, true]);
 }
+
+/* ---------------- game speed ---------------- */
+
+/// A run with player 0 holding the piercing attack, standing on the floor
+/// facing the given way and nothing else on the field. Returns the box their
+/// reach covers.
+fn piercing_player(facing_right: bool) -> (Game, Body) {
+    let mut game = new_game();
+    game.start_run(1);
+    settle_on_floor(&mut game);
+    clear_arena(&mut game);
+    game.players[0].attack = AttackKind::Piercing;
+    game.players[0].facing_right = facing_right;
+    let v = game.viewport;
+    let zone = game.players[0].projected_swing(&v, game.waves.rule.gun_reach(), game.wave, 1.0);
+    (game, zone)
+}
+
+/// A zombie whose near edge stands `gap` into the reach, from the player's side.
+fn zombie_in_reach(game: &mut Game, zone: &Body, gap: f32) {
+    let v = game.viewport;
+    let mut z = Zombie::from_edge(&v, &mut game.rng, TEST_ENEMY_COLOR);
+    z.body.y = zone.y;
+    z.body.x = if game.players[0].facing_right {
+        zone.x + gap
+    } else {
+        zone.x + zone.w - gap - z.body.w
+    };
+    game.zombies.push(z);
+}
+
+fn close(a: f32, b: f32) -> bool {
+    (a - b).abs() < 1e-4
+}
+
+#[test]
+fn the_game_runs_at_full_speed_with_nothing_in_reach() {
+    let (game, _) = piercing_player(true);
+    assert_eq!(game.time_scale(), 1.0);
+}
+
+#[test]
+fn pierce_slows_the_game_in_a_line_from_the_tip_of_its_reach_to_a_quarter() {
+    for facing_right in [true, false] {
+        let (mut game, zone) = piercing_player(facing_right);
+        zombie_in_reach(&mut game, &zone, 0.0);
+        assert!(close(game.time_scale(), PIERCE_SLOW_MIN), "touching is the slowest");
+
+        let (mut game, zone) = piercing_player(facing_right);
+        zombie_in_reach(&mut game, &zone, zone.w / 2.0);
+        assert!(close(game.time_scale(), (1.0 + PIERCE_SLOW_MIN) / 2.0), "half way is half way");
+
+        let (mut game, zone) = piercing_player(facing_right);
+        zombie_in_reach(&mut game, &zone, zone.w);
+        assert!(close(game.time_scale(), 1.0), "the very tip of the reach is full speed");
+    }
+    assert_eq!(PIERCE_SLOW_MIN, 0.25);
+}
+
+#[test]
+fn the_nearest_enemy_in_reach_decides() {
+    let (mut game, zone) = piercing_player(true);
+    zombie_in_reach(&mut game, &zone, zone.w * 0.75);
+    zombie_in_reach(&mut game, &zone, zone.w * 0.25);
+    let want = PIERCE_SLOW_MIN + (1.0 - PIERCE_SLOW_MIN) * 0.25;
+    assert!(close(game.time_scale(), want), "got {}", game.time_scale());
+}
+
+#[test]
+fn a_flyer_in_reach_counts_too() {
+    let (mut game, zone) = piercing_player(true);
+    let size_ref = game.players[0].body;
+    let timer = game.timer;
+    let mut f = Flyer::from_edge(&game.viewport, &size_ref, timer, &mut game.rng);
+    f.body.x = zone.x;
+    f.body.y = zone.y;
+    game.flyers.push(f);
+    assert!(close(game.time_scale(), PIERCE_SLOW_MIN));
+}
+
+#[test]
+fn an_enemy_behind_or_out_of_reach_does_not_slow_anything() {
+    let (mut game, zone) = piercing_player(true);
+    // Behind: facing right, right up against the player's back.
+    let v = game.viewport;
+    let mut z = Zombie::from_edge(&v, &mut game.rng, TEST_ENEMY_COLOR);
+    z.body.y = zone.y;
+    z.body.x = game.players[0].body.x - z.body.w - 1.0;
+    game.zombies.push(z);
+    // Ahead, but past the tip.
+    zombie_in_reach(&mut game, &zone, zone.w + 5.0);
+    assert_eq!(game.time_scale(), 1.0);
+}
+
+#[test]
+fn only_the_piercing_attack_slows_the_game() {
+    let (mut game, zone) = piercing_player(true);
+    zombie_in_reach(&mut game, &zone, 0.0);
+    game.players[0].attack = AttackKind::Basic;
+    assert_eq!(game.time_scale(), 1.0);
+}
+
+#[test]
+fn menus_and_the_pause_screen_always_run_at_full_speed() {
+    let (mut game, zone) = piercing_player(true);
+    zombie_in_reach(&mut game, &zone, 0.0);
+    game.state = State::Paused;
+    assert_eq!(game.time_scale(), 1.0);
+}
+
+#[test]
+fn edges_survive_a_frame_that_ran_no_tick_and_held_state_does_not() {
+    let mut frame = idle();
+    frame.players[0].jump = true;
+    frame.players[0].left = true;
+    frame.players[0].attack_held = true;
+    frame.pause = true;
+    let kept = frame.edges_only();
+    assert!(kept.players[0].jump && kept.pause, "the presses are carried");
+    assert!(!kept.players[0].left && !kept.players[0].attack_held, "held state is re-read");
+
+    let mut next = idle();
+    next.players[0].right = true;
+    next.merge(&kept);
+    assert!(next.players[0].jump && next.players[0].right && next.pause);
+}
