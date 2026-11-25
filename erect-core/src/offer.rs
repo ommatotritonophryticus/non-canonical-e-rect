@@ -381,6 +381,11 @@ fn build_pool(
     // A second level only once its first is held, so the two never stand side
     // by side and a level is never skipped.
     for boon in Boon::ALL {
+        // The thrown attack already keeps firing while the button is held, so
+        // the auto attack would be a box that changes nothing for it.
+        if boon == Boon::AutoAttack && current == AttackKind::Bullet {
+            continue;
+        }
         if held.can_take(boon) {
             pool[n] = OfferItem::Boon(boon);
             n += 1;

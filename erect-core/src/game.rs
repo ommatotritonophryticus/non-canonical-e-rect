@@ -11,7 +11,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::attack::AttackKind;
-use crate::boon::{Boon, WallMod, DASH_FREE_2_DISCOUNT, SHIELD_COOLDOWN_TICKS};
+use crate::boon::{
+    Boon, WallMod, AUTO_ATTACK_GAP_TICKS, DASH_FREE_2_DISCOUNT, SHIELD_COOLDOWN_TICKS,
+};
 use crate::attack::MAX_LEVEL;
 use crate::campaign::{self, ModeKind};
 use crate::audio::{AudioEvent, AudioQueue, MusicState, Situation};
@@ -295,12 +297,12 @@ impl Game {
             campaign_menu: Menu::tight(44.0, 8.0),
             pause_menu: Menu::new(48.0),
             confirm_menu: Menu::new(52.0),
-            // Nine rows, so a tighter pitch than the rest.
-            // Fourteen rows on a 480x272 panel. At the old 7% pitch the last
-            // five would sit under the floor band; 5% puts the bottom row at
-            // 81% and still leaves 11.6px of text in a 13.6px slot, which is
-            // above the readable floor the PSP renderer holds everything to.
-            dev_menu: Menu::tight(16.0, 5.0),
+            // Fifteen rows on a 480x272 panel. At the old 7% pitch the last
+            // six would sit under the floor band, and at 5% the last one still
+            // does; 4.7% puts the bottom row at 82% and leaves 11px of text in
+            // a 12.8px slot, which is the readable floor the PSP renderer holds
+            // everything to.
+            dev_menu: Menu::tight(16.0, 4.7),
             dev: DevSetup::default(),
             schemes,
             max_players,
@@ -1681,6 +1683,11 @@ impl Game {
                     swatch: None,
                 },
                 MenuRow {
+                    label: format!("AUTO ATTACK: {}", Self::on_off(self.dev.boons.auto_attack)),
+                    action: MenuAction::AdjustDevAutoAttack,
+                    swatch: None,
+                },
+                MenuRow {
                     label: "START".to_string(),
                     action: MenuAction::StartDevRun,
                     swatch: None,
@@ -1865,6 +1872,7 @@ impl Game {
             Some(MenuAction::AdjustDevDashFree) => self.dev.cycle_boon(Boon::DashFree, dir),
             Some(MenuAction::AdjustDevShield) => self.dev.cycle_boon(Boon::Shield, dir),
             Some(MenuAction::AdjustDevWall) => self.dev.cycle_wall(dir),
+            Some(MenuAction::AdjustDevAutoAttack) => self.dev.toggle_auto_attack(),
             Some(MenuAction::AdjustCampaignWeapon) => {
                 let n = AttackKind::EVERY.len() as i32;
                 self.campaign_pick =
@@ -1906,6 +1914,7 @@ impl Game {
             Some(MenuAction::AdjustDevDashFree) => self.dev.cycle_boon(Boon::DashFree, 1),
             Some(MenuAction::AdjustDevShield) => self.dev.cycle_boon(Boon::Shield, 1),
             Some(MenuAction::AdjustDevWall) => self.dev.cycle_wall(1),
+            Some(MenuAction::AdjustDevAutoAttack) => self.dev.toggle_auto_attack(),
             Some(MenuAction::AdjustCampaignWeapon) => {
                 let n = AttackKind::EVERY.len() as i32;
                 self.campaign_pick = ((self.campaign_pick as i32 + 1).rem_euclid(n)) as usize;
@@ -2060,11 +2069,22 @@ impl Game {
                 self.players[i].dash_dir = if self.players[i].facing_right { 1.0 } else { -1.0 };
             }
             // A thrown attack keeps going while the button is down; everything
-            // else takes one swing per press.
-            let repeat = self.players[i].attack == AttackKind::Bullet && intent.attack_held;
+            // else takes one swing per press - unless the auto attack is held,
+            // which makes every kind keep going, with a short rest between.
+            let repeat = intent.attack_held
+                && (self.players[i].attack == AttackKind::Bullet
+                    || (self.players[i].boons.auto_attack
+                        && self.timer >= self.players[i].auto_ready_at));
             if (intent.attack || repeat) && !self.players[i].attacking() {
                 let timer = self.timer;
                 let p = &mut self.players[i];
+                // When the held button may start the next one: once this swing
+                // is over and the rest after it has passed. A swing of N ticks
+                // is spent one tick sooner than N on from here - its count
+                // already drops on the tick it starts - so that is where the
+                // rest is counted from.
+                let length = p.attack.swing_ticks(ATTACK_TICKS) as i64;
+                p.auto_ready_at = timer + length - 1 + AUTO_ATTACK_GAP_TICKS;
                 if p.combo == 0 || timer - p.combo_timestamp > COMBO_WINDOW_TICKS {
                     p.combo_timestamp = timer;
                     p.combo = 1;

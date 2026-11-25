@@ -144,6 +144,10 @@ impl DevSetup {
     /// Every boon at once, or none. What "set all the upgrades" means when it
     /// is one press: the wall goes to the first modified one rather than back
     /// to plain, because plain is what "off" already looks like.
+    pub fn toggle_auto_attack(&mut self) {
+        self.boons.auto_attack = !self.boons.auto_attack;
+    }
+
     pub fn toggle_all_boons(&mut self) {
         self.boons = if self.all_boons() {
             Boons::default()

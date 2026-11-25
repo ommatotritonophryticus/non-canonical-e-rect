@@ -5065,6 +5065,8 @@ fn each_upgrade_can_also_be_set_on_its_own() {
     assert_eq!(dev.boon_label(Boon::DoubleJump), "2");
     assert!(!dev.all_boons(), "the wall is one of them too");
     dev.cycle_wall(1);
+    assert!(!dev.all_boons(), "and so is the auto attack");
+    dev.toggle_auto_attack();
     assert!(dev.all_boons());
 
     dev.cycle_boon(Boon::DoubleJump, 1);
@@ -9562,4 +9564,88 @@ fn only_the_lunge_carries() {
     }
     assert_eq!(AttackKind::Lunge.knockback_scale(1), 0.0);
     assert_eq!(AttackKind::Lunge.lift_scale(), 0.0);
+}
+
+/* ---------------- the auto attack ---------------- */
+
+/// Holds attack for `ticks` ticks (pressed on the first) and reports how many
+/// swings started, and how many ticks passed with no swing out between each
+/// two of them.
+fn hold_attack(game: &mut Game, ticks: usize) -> (usize, alloc::vec::Vec<usize>) {
+    let mut swings = 0;
+    let mut gaps = alloc::vec::Vec::new();
+    let mut idle_run = 0;
+    let mut last_strike = game.players[0].strike_id;
+    for t in 0..ticks {
+        let mut frame = idle();
+        frame.players[0].attack = t == 0;
+        frame.players[0].attack_held = true;
+        game.tick(&frame);
+        let p = &game.players[0];
+        if p.strike_id != last_strike {
+            if swings > 0 {
+                gaps.push(idle_run);
+            }
+            swings += 1;
+            last_strike = p.strike_id;
+            idle_run = 0;
+        } else if !p.attacking() {
+            idle_run += 1;
+        }
+    }
+    (swings, gaps)
+}
+
+#[test]
+fn holding_attack_with_the_auto_attack_keeps_swinging_two_ticks_apart() {
+    for kind in [AttackKind::Basic, AttackKind::Hammer, AttackKind::Lunge] {
+        let mut game = player_with(Boons { auto_attack: true, ..Default::default() });
+        clear_arena(&mut game);
+        game.players[0].attack = kind;
+        let (swings, gaps) = hold_attack(&mut game, 120);
+        assert!(swings > 3, "{kind:?}: only {swings} swings in two seconds");
+        assert!(
+            gaps.iter().all(|g| *g as i64 == crate::boon::AUTO_ATTACK_GAP_TICKS),
+            "{kind:?}: rests between swings were {gaps:?}"
+        );
+    }
+}
+
+#[test]
+fn without_the_auto_attack_holding_is_one_swing() {
+    let mut game = player_with(Boons::default());
+    clear_arena(&mut game);
+    let (swings, _) = hold_attack(&mut game, 120);
+    assert_eq!(swings, 1, "a held button should not swing again on its own");
+}
+
+#[test]
+fn letting_go_stops_the_auto_attack() {
+    let mut game = player_with(Boons { auto_attack: true, ..Default::default() });
+    clear_arena(&mut game);
+    hold_attack(&mut game, 30);
+    let strike = game.players[0].strike_id;
+    for _ in 0..60 {
+        game.tick(&idle());
+    }
+    assert_eq!(game.players[0].strike_id, strike, "it swung with the button up");
+}
+
+#[test]
+fn the_auto_attack_is_not_offered_to_a_player_who_throws() {
+    let v = Viewport::new(1280.0, 800.0);
+    let mut rng = Rng::new(99);
+    let mut offered_to_a_swinger = false;
+    for roll in 0..2000 {
+        let current = if roll % 2 == 0 { AttackKind::Bullet } else { AttackKind::Basic };
+        let offer = Offer::roll(&v, 0.0, 700.0, current, 1, Boons::default(), 1, WaveRule::Normal, 0, &mut rng);
+        for choice in offer.choices.iter().take(offer.count) {
+            if choice.item == OfferItem::Boon(Boon::AutoAttack) {
+                assert_ne!(current, AttackKind::Bullet, "the thrown attack already keeps firing");
+                offered_to_a_swinger = true;
+            }
+        }
+    }
+    assert!(offered_to_a_swinger, "it should still come up for everyone else");
+    assert_eq!(Boon::AutoAttack.label(), "AUTO ATTACK");
 }

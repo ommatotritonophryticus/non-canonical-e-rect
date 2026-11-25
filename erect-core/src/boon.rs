@@ -26,6 +26,10 @@ pub const SHIELD_COOLDOWN_TICKS: i64 = TICKS_PER_SEC as i64;
 /// How many times cheaper the dash is at [`Boon::DashFree2`].
 pub const DASH_FREE_2_DISCOUNT: i64 = 5;
 
+/// Ticks the attack rests between two swings [`Boon::AutoAttack`] makes on its
+/// own. A swing ends, two ticks pass with nothing out, and the next one starts.
+pub const AUTO_ATTACK_GAP_TICKS: i64 = 2;
+
 /// What the wall does to everything on the field when it goes up, beyond
 /// standing there.
 ///
@@ -72,10 +76,13 @@ pub enum Boon {
     WallPull,
     /// The wall turns grey and clears the field out.
     WallPush,
+    /// Holding attack keeps swinging, the way the thrown attack keeps firing:
+    /// a fresh swing [`AUTO_ATTACK_GAP_TICKS`] after the last one ends.
+    AutoAttack,
 }
 
 impl Boon {
-    pub const ALL: [Boon; 8] = [
+    pub const ALL: [Boon; 9] = [
         Boon::DoubleJump,
         Boon::DoubleJump2,
         Boon::DashFree,
@@ -84,6 +91,7 @@ impl Boon {
         Boon::Shield2,
         Boon::WallPull,
         Boon::WallPush,
+        Boon::AutoAttack,
     ];
 
     pub fn label(self) -> &'static str {
@@ -96,6 +104,7 @@ impl Boon {
             Boon::Shield2 => "SHIELD 2",
             Boon::WallPull => "BLACK WALL",
             Boon::WallPush => "GREY WALL",
+            Boon::AutoAttack => "AUTO ATTACK",
         }
     }
 
@@ -137,6 +146,7 @@ pub struct Boons {
     pub shield: bool,
     pub shield_2: bool,
     pub wall: WallMod,
+    pub auto_attack: bool,
 }
 
 impl Boons {
@@ -150,6 +160,7 @@ impl Boons {
         shield: true,
         shield_2: true,
         wall: WallMod::Pull,
+        auto_attack: true,
     };
 
     pub fn has(&self, boon: Boon) -> bool {
@@ -162,6 +173,7 @@ impl Boons {
             Boon::Shield2 => self.shield_2,
             Boon::WallPull => self.wall == WallMod::Pull,
             Boon::WallPush => self.wall == WallMod::Push,
+            Boon::AutoAttack => self.auto_attack,
         }
     }
 
@@ -179,6 +191,7 @@ impl Boons {
             Boon::DashFree | Boon::DashFree2 => (self.dash_free, self.dash_free_2),
             Boon::Shield | Boon::Shield2 => (self.shield, self.shield_2),
             Boon::WallPull | Boon::WallPush => return (self.wall != WallMod::Plain) as u8,
+            Boon::AutoAttack => return self.auto_attack as u8,
         };
         one as u8 + (one && two) as u8
     }
@@ -200,7 +213,7 @@ impl Boons {
                 self.shield = one;
                 self.shield_2 = two;
             }
-            Boon::WallPull | Boon::WallPush => {}
+            Boon::WallPull | Boon::WallPush | Boon::AutoAttack => {}
         }
     }
 
@@ -217,6 +230,7 @@ impl Boons {
             && self.shield
             && self.shield_2
             && self.wall != WallMod::Plain
+            && self.auto_attack
     }
 
     pub fn take(&mut self, boon: Boon) {
@@ -231,6 +245,7 @@ impl Boons {
             // the same stroke, which is what makes the pair a choice.
             Boon::WallPull => self.wall = WallMod::Pull,
             Boon::WallPush => self.wall = WallMod::Push,
+            Boon::AutoAttack => self.auto_attack = true,
         }
     }
 }

@@ -85,6 +85,10 @@ pub struct Player {
     /// counter, so it survives the clock going back to zero at the start of a
     /// run - a "last used at" would read as freshly spent there.
     pub shield_ready_at: i64,
+    /// First tick on which a held attack button may start another swing, for
+    /// [`crate::boon::Boon::AutoAttack`]. A deadline for the same reason the
+    /// shield's is one.
+    pub auto_ready_at: i64,
 
     pub grounded: bool,
     pub facing_right: bool,
@@ -152,6 +156,7 @@ impl Player {
             boons: Boons::default(),
             air_jumps: 0,
             shield_ready_at: 0,
+            auto_ready_at: 0,
             grounded: false,
             facing_right: true,
             attack_ticks: 0,
@@ -185,6 +190,7 @@ impl Player {
         self.grounded = false;
         self.facing_right = true;
         self.attack_ticks = 0;
+        self.auto_ready_at = 0;
         self.swing_from_dash = false;
         self.energy = 0;
         self.score = 0;

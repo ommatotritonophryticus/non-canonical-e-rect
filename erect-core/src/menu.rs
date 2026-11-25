@@ -53,6 +53,7 @@ pub enum MenuAction {
     AdjustDevDashFree,
     AdjustDevShield,
     AdjustDevWall,
+    AdjustDevAutoAttack,
     /// Begin a run on the parameters set above.
     StartDevRun,
 }
@@ -83,6 +84,7 @@ impl MenuRow {
                 | MenuAction::AdjustDevDashFree
                 | MenuAction::AdjustDevShield
                 | MenuAction::AdjustDevWall
+                | MenuAction::AdjustDevAutoAttack
                 | MenuAction::AdjustCampaignWeapon
                 | MenuAction::AdjustCampaignMode
         )
