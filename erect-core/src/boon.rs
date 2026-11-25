@@ -27,8 +27,8 @@ pub const SHIELD_COOLDOWN_TICKS: i64 = TICKS_PER_SEC as i64;
 pub const DASH_FREE_2_DISCOUNT: i64 = 5;
 
 /// Ticks the attack rests between two swings [`Boon::AutoAttack`] makes on its
-/// own. A swing ends, two ticks pass with nothing out, and the next one starts.
-pub const AUTO_ATTACK_GAP_TICKS: i64 = 2;
+/// own. A swing ends, four ticks pass with nothing out, and the next one starts.
+pub const AUTO_ATTACK_GAP_TICKS: i64 = 4;
 
 /// What the wall does to everything on the field when it goes up, beyond
 /// standing there.

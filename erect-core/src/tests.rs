@@ -9597,7 +9597,7 @@ fn hold_attack(game: &mut Game, ticks: usize) -> (usize, alloc::vec::Vec<usize>)
 }
 
 #[test]
-fn holding_attack_with_the_auto_attack_keeps_swinging_two_ticks_apart() {
+fn holding_attack_with_the_auto_attack_rests_between_swings() {
     for kind in [AttackKind::Basic, AttackKind::Hammer, AttackKind::Lunge] {
         let mut game = player_with(Boons { auto_attack: true, ..Default::default() });
         clear_arena(&mut game);
