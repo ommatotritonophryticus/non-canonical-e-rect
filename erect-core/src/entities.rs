@@ -111,11 +111,25 @@ pub struct Player {
     /// which is how a kind that may only land once per swing knows.
     pub strike_id: u32,
     pub field: UltimateField,
+    /// The player's moving boxes as they stood when the tick in progress
+    /// began, for drawing them part of the way between two ticks.
+    pub prev: PlayerPrev,
+}
+
+/// See [`Player::prev`]. Every box the player draws that can move, since the
+/// swing and the wall each change on their own and not only with the body.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PlayerPrev {
+    pub body: Option<Body>,
+    pub gun: Option<Body>,
+    pub gun_back: Option<Body>,
+    pub field: Option<Body>,
 }
 
 impl Player {
     pub fn new(index: usize, v: &Viewport, color: Rgb, scheme: usize) -> Self {
         let mut player = Self {
+            prev: PlayerPrev::default(),
             index,
             body: Body::new(v.wper(50.0), v.hper(10.0), v.wper(5.0), v.hper(10.0)),
             ax: 0.0,
@@ -377,6 +391,10 @@ impl Player {
 #[derive(Clone, Copy, Debug)]
 pub struct Bullet {
     pub body: Body,
+    /// Where this stood when the tick in progress began, for drawing it
+    /// part of the way between two ticks. `None` until its first tick has
+    /// started: something that only just appeared is drawn where it is.
+    pub prev: Option<Body>,
     /// Per-tick travel. Zeroed the moment it stops on something.
     pub ax: f32,
     pub owner: usize,
@@ -424,6 +442,7 @@ impl Bullet {
         let side = from.h / 2.0;
         let x = if facing_right { from.x + from.w } else { from.x - side };
         Self {
+            prev: None,
             body: Body::new(x, from.y + v.hper(0.5), side, side),
             ax: if facing_right { 1.0 } else { -1.0 } * v.wper(PLAYER_MOVE_PCT * BULLET_SPEED_MULT),
             owner,
@@ -659,6 +678,10 @@ impl Behaviors {
 #[derive(Clone, Debug)]
 pub struct Zombie {
     pub body: Body,
+    /// Where this stood when the tick in progress began, for drawing it
+    /// part of the way between two ticks. `None` until its first tick has
+    /// started: something that only just appeared is drawn where it is.
+    pub prev: Option<Body>,
     pub ax: f32,
     pub ay: f32,
     pub hp: f32,
@@ -720,6 +743,7 @@ pub struct AimDot {
 impl Zombie {
     fn base(x: f32, y: f32, v: &Viewport, color: Rgb) -> Self {
         Self {
+            prev: None,
             body: Body::new(x, y, v.wper(5.0), v.hper(10.0)),
             ax: 0.0,
             ay: 0.0,
@@ -883,6 +907,10 @@ pub enum FlyerBehavior {
 
 #[derive(Clone, Debug)]
 pub struct Flyer {
+    /// Where this stood when the tick in progress began, for drawing it
+    /// part of the way between two ticks. `None` until its first tick has
+    /// started: something that only just appeared is drawn where it is.
+    pub prev: Option<Body>,
     /// Set the first time this flyer is damaged; a teleporter uses it to blink
     /// away exactly once, on that first hit.
     pub hurt_once: bool,
@@ -910,6 +938,7 @@ impl Flyer {
         );
         let x = if rng.flip() { v.w - size_ref.w } else { 0.0 };
         Self {
+            prev: None,
             hurt_once: false,
             last_strike: 0,
             is_boss: false,
@@ -952,6 +981,10 @@ impl Flyer {
 #[derive(Clone, Debug)]
 pub struct Explosion {
     pub body: Body,
+    /// Where this stood when the tick in progress began, for drawing it
+    /// part of the way between two ticks. `None` until its first tick has
+    /// started: something that only just appeared is drawn where it is.
+    pub prev: Option<Body>,
     pub max_w: f32,
     pub finished: bool,
     /// What it does to anything it touches. Zero for the blast every death
@@ -968,6 +1001,7 @@ pub struct Explosion {
 impl Explosion {
     pub fn new(x: f32, y: f32, v: &Viewport) -> Self {
         Self {
+            prev: None,
             body: Body::new(x, y, 0.0, 0.0),
             max_w: v.wper(20.0),
             finished: false,
@@ -1004,6 +1038,10 @@ impl Explosion {
 #[derive(Clone, Debug)]
 pub struct Projectile {
     pub body: Body,
+    /// Where this stood when the tick in progress began, for drawing it
+    /// part of the way between two ticks. `None` until its first tick has
+    /// started: something that only just appeared is drawn where it is.
+    pub prev: Option<Body>,
     pub ax: f32,
     pub ay: f32,
     pub damage: f32,

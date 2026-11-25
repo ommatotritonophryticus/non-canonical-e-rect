@@ -182,6 +182,12 @@ pub struct Game {
     /// World x currently at the left edge of the view. The field itself has no
     /// edges; this is the only thing that decides what is on screen.
     pub camera_x: f32,
+    /// Where the camera stood when the tick in progress began; see
+    /// [`Self::with_blend`].
+    prev_camera_x: f32,
+    /// Where [`Self::with_blend`] keeps the real boxes while it draws the
+    /// blended ones. Kept between frames so drawing never allocates.
+    blend_saved: Vec<Body>,
     /// Seeds the parallax skyline, so two runs do not share one.
     pub backdrop_seed: u64,
     /// Re-rolled on arriving at the title screen and on starting a run. A
@@ -299,6 +305,8 @@ impl Game {
             schemes,
             max_players,
             camera_x: 0.0,
+            prev_camera_x: 0.0,
+            blend_saved: Vec::new(),
             backdrop_seed: seed ^ 0xB5AD_4ECE_DA1C_E2A9,
             audio_roll: seed,
             menu_drift: 1.0,
@@ -479,6 +487,114 @@ impl Game {
             Some(gap) => PIERCE_SLOW_MIN + (1.0 - PIERCE_SLOW_MIN) * gap / zone.w,
             None => 1.0,
         }
+    }
+
+    /// Calls `f` on every box that moves between ticks, with where it stood
+    /// when the tick in progress began. Always in the same order, which is what
+    /// lets [`Self::with_blend`] put back what it changed without storing which
+    /// box was which.
+    fn for_each_motion(&mut self, mut f: impl FnMut(&mut Body, Option<Body>)) {
+        for p in self.players.iter_mut() {
+            f(&mut p.body, p.prev.body);
+            f(&mut p.gun, p.prev.gun);
+            if let Some(back) = p.gun_back.as_mut() {
+                f(back, p.prev.gun_back);
+            }
+            f(&mut p.field.body, p.prev.field);
+        }
+        for z in self.zombies.iter_mut() {
+            f(&mut z.body, z.prev);
+        }
+        for fl in self.flyers.iter_mut() {
+            f(&mut fl.body, fl.prev);
+        }
+        for b in self.bullets.iter_mut() {
+            f(&mut b.body, b.prev);
+        }
+        for e in self.explosions.iter_mut() {
+            f(&mut e.body, e.prev);
+        }
+        for p in self.projectiles.iter_mut() {
+            f(&mut p.body, p.prev);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prev_camera_x_for_tests(&mut self, x: f32) {
+        self.prev_camera_x = x;
+    }
+
+    /// Records where every moving box stands, as the start of a tick.
+    fn snapshot_motion(&mut self) {
+        self.prev_camera_x = self.camera_x;
+        for p in self.players.iter_mut() {
+            p.prev = PlayerPrev {
+                body: Some(p.body),
+                gun: Some(p.gun),
+                gun_back: p.gun_back,
+                field: Some(p.field.body),
+            };
+        }
+        for z in self.zombies.iter_mut() {
+            z.prev = Some(z.body);
+        }
+        for fl in self.flyers.iter_mut() {
+            fl.prev = Some(fl.body);
+        }
+        for b in self.bullets.iter_mut() {
+            b.prev = Some(b.body);
+        }
+        for e in self.explosions.iter_mut() {
+            e.prev = Some(e.body);
+        }
+        for p in self.projectiles.iter_mut() {
+            p.prev = Some(p.body);
+        }
+    }
+
+    /// Draws the world `alpha` of the way through the last tick that ran: 0 is
+    /// where it started, 1 is where it ended up, which is the state as it is.
+    ///
+    /// What makes slowing the game down smooth. A slowed world takes fewer
+    /// ticks a second - at a quarter speed, one every fourth frame - and drawn
+    /// as it stands it would sit still for three frames and then jump. Drawn
+    /// with this, every frame in between is a step of the way.
+    ///
+    /// The boxes are moved for the length of `draw` and put back after, so the
+    /// simulation never sees a blended position; nothing is allocated once the
+    /// first frame has sized the buffer. A box that only just appeared, or that
+    /// moved further than [`BLEND_JUMP_PCT`] - put somewhere rather than moved
+    /// there - is drawn where it is.
+    pub fn with_blend<R>(&mut self, alpha: f32, draw: impl FnOnce(&Game) -> R) -> R {
+        let alpha = alpha.clamp(0.0, 1.0);
+        if alpha >= 1.0 {
+            return draw(self);
+        }
+        let jump = self.viewport.wper(BLEND_JUMP_PCT);
+        let mut saved = core::mem::take(&mut self.blend_saved);
+        saved.clear();
+        self.for_each_motion(|cur, prev| {
+            saved.push(*cur);
+            if let Some(prev) = prev {
+                *cur = blend_body(prev, *cur, alpha, jump);
+            }
+        });
+        let camera = self.camera_x;
+        if (camera - self.prev_camera_x).abs() <= jump {
+            self.camera_x = self.prev_camera_x + (camera - self.prev_camera_x) * alpha;
+        }
+
+        let out = draw(self);
+
+        let mut real = saved.iter();
+        self.for_each_motion(|cur, _| {
+            if let Some(body) = real.next() {
+                *cur = *body;
+            }
+        });
+        self.camera_x = camera;
+        self.blend_saved = saved;
+        out
     }
 
     pub fn enemies_visible(&self) -> bool {
@@ -1334,6 +1450,9 @@ impl Game {
     /* ---------------- per-tick entry point ---------------- */
 
     pub fn tick(&mut self, input: &InputFrame) {
+        // Where everything stands now is where this tick starts from, which
+        // is what a frame drawn partway through it slides from.
+        self.snapshot_motion();
         // Arriving at the title draws a new soundtrack, wherever it was arrived
         // from - abandoning a run, dying, backing out of settings. Spotted here
         // rather than at each of those sites so no path can forget.
@@ -3199,6 +3318,7 @@ impl Game {
         let dist = libm::sqrtf(dx * dx + dy * dy).max(1.0);
         let speed = v.wper(1.2);
         self.projectiles.push(Projectile {
+            prev: None,
             body: Body::new(from.center_x(), from.center_y(), v.wper(1.5), v.hper(1.5)),
             ax: dx / dist * speed,
             ay: dy / dist * speed,
@@ -3482,4 +3602,15 @@ impl Game {
         }
         false
     }
+}
+
+/// `alpha` of the way from `prev` to `cur`, every edge at once - so a box that
+/// grows, like a blast, grows smoothly too. Drawn where it is instead when it
+/// travelled further than `jump`.
+fn blend_body(prev: Body, cur: Body, alpha: f32, jump: f32) -> Body {
+    if (cur.x - prev.x).abs() > jump || (cur.y - prev.y).abs() > jump {
+        return cur;
+    }
+    let mix = |a: f32, b: f32| a + (b - a) * alpha;
+    Body::new(mix(prev.x, cur.x), mix(prev.y, cur.y), mix(prev.w, cur.w), mix(prev.h, cur.h))
 }

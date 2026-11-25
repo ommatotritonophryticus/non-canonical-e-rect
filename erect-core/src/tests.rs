@@ -1050,6 +1050,7 @@ fn projectiles_knock_back_too() {
     let p = game.players[0].body;
     let v = game.viewport;
     game.projectiles.push(Projectile {
+        prev: None,
         body: Body::new(p.x + p.w + 1.0, p.y, v.wper(1.5), v.hper(1.5)),
         ax: -v.wper(1.0),
         ay: 0.0,
@@ -5770,6 +5771,7 @@ fn a_shot_cannot_reach_through_a_wall_or_a_dash() {
         arm(&mut game);
         let p = game.players[0].body;
         game.projectiles.push(Projectile {
+            prev: None,
             // Wide enough that a dash cannot step out of it: what is under test
             // is the guard, not whether the shot connects.
             body: Body::new(p.x - v.wper(10.0), p.y, v.wper(25.0), v.hper(8.0)),
@@ -9316,4 +9318,113 @@ fn edges_survive_a_frame_that_ran_no_tick_and_held_state_does_not() {
     next.players[0].right = true;
     next.merge(&kept);
     assert!(next.players[0].jump && next.players[0].right && next.pause);
+}
+
+/* ---------------- drawing between ticks ---------------- */
+
+/// A run with one zombie walking, after one tick has started from where it
+/// stood. Returns where it stood and where it stands now.
+fn zombie_mid_walk() -> (Game, Body, Body) {
+    let mut game = new_game();
+    game.start_run(1);
+    settle_on_floor(&mut game);
+    clear_arena(&mut game);
+    let v = game.viewport;
+    let mut z = Zombie::from_edge(&v, &mut game.rng, TEST_ENEMY_COLOR);
+    z.body.x = game.players[0].body.x + v.wper(30.0);
+    z.body.y = game.players[0].body.y;
+    game.zombies.push(z);
+    game.tick(&idle());
+    let from = game.zombies[0].prev.expect("the tick should have recorded where it began");
+    let to = game.zombies[0].body;
+    (game, from, to)
+}
+
+#[test]
+fn a_tick_records_where_everything_started() {
+    let (_, from, to) = zombie_mid_walk();
+    assert_ne!(from.x, to.x, "the premise: it walked");
+}
+
+#[test]
+fn a_blended_frame_draws_the_way_between_two_ticks_and_puts_it_all_back() {
+    let (mut game, from, to) = zombie_mid_walk();
+    let camera = game.camera_x;
+    let drawn = game.with_blend(0.25, |g| g.zombies[0].body);
+    assert!(close(drawn.x, from.x + (to.x - from.x) * 0.25), "a quarter of the way");
+    assert_eq!(game.zombies[0].body, to, "the simulation's own box is untouched after");
+    assert_eq!(game.camera_x, camera, "and so is the camera");
+}
+
+#[test]
+fn a_whole_frame_draws_the_state_as_it_stands() {
+    let (mut game, _, to) = zombie_mid_walk();
+    assert_eq!(game.with_blend(1.0, |g| g.zombies[0].body), to);
+}
+
+#[test]
+fn the_camera_slides_with_everything_else() {
+    let (mut game, _, _) = zombie_mid_walk();
+    let to = game.camera_x;
+    let from = to - 10.0;
+    game.prev_camera_x_for_tests(from);
+    let drawn = game.with_blend(0.5, |g| g.camera_x);
+    assert!(close(drawn, from + 5.0));
+    assert_eq!(game.camera_x, to);
+}
+
+#[test]
+fn something_new_is_drawn_where_it_appeared() {
+    let (mut game, _, _) = zombie_mid_walk();
+    let v = game.viewport;
+    let fresh = Zombie::from_edge(&v, &mut game.rng, TEST_ENEMY_COLOR);
+    let at = fresh.body;
+    game.zombies.push(fresh);
+    assert_eq!(game.with_blend(0.1, |g| g.zombies[1].body), at);
+}
+
+#[test]
+fn a_box_put_somewhere_far_is_not_slid_there() {
+    let (mut game, _, _) = zombie_mid_walk();
+    let v = game.viewport;
+    game.zombies[0].body.x += v.wper(BLEND_JUMP_PCT * 2.0);
+    let landed = game.zombies[0].body;
+    assert_eq!(game.with_blend(0.5, |g| g.zombies[0].body), landed);
+}
+
+#[test]
+fn a_growing_blast_grows_between_ticks_too() {
+    let mut game = new_game();
+    game.start_run(1);
+    clear_arena(&mut game);
+    let v = game.viewport;
+    game.explosions.push(Explosion::new(v.w / 2.0, v.h / 2.0, &v));
+    game.tick(&idle());
+    game.tick(&idle());
+    let e = &game.explosions[0];
+    let (from, to) = (e.prev.unwrap().w, e.body.w);
+    assert!(to > from, "the premise: it grew");
+    let drawn = game.with_blend(0.5, |g| g.explosions[0].body.w);
+    assert!(close(drawn, (from + to) / 2.0));
+}
+
+#[test]
+fn drawing_blended_frames_does_not_change_the_simulation() {
+    let mut plain = new_game();
+    let mut drawn = new_game();
+    plain.start_run(1);
+    drawn.start_run(1);
+    let mut walk = idle();
+    walk.players[0].right = true;
+    for i in 0..300 {
+        plain.tick(&walk);
+        drawn.tick(&walk);
+        drawn.with_blend((i % 4) as f32 / 4.0, |_| ());
+    }
+    assert_eq!(plain.players[0].body, drawn.players[0].body);
+    assert_eq!(plain.camera_x, drawn.camera_x);
+    assert_eq!(plain.zombies.len(), drawn.zombies.len());
+    for (a, b) in plain.zombies.iter().zip(drawn.zombies.iter()) {
+        assert_eq!(a.body, b.body);
+    }
 }

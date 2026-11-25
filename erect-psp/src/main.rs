@@ -6,8 +6,9 @@
 //!
 //! One tick per vblank at full speed. The PSP refreshes at ~60 Hz, which is
 //! exactly the rate the core's constants are tuned for. A slowed world - see
-//! `Game::time_scale` - banks a fraction of a tick per vblank instead, and
-//! steps when a whole one has built up.
+//! `Game::time_scale` - banks a fraction of a tick per vblank instead, steps
+//! when a whole one has built up, and draws the vblanks in between partway
+//! through it - see `Game::with_blend`.
 
 #![no_std]
 #![no_main]
@@ -98,7 +99,9 @@ fn psp_main() {
         frame.merge(&pending);
         clock += game.time_scale();
         let mut ticked = false;
-        while clock >= 1.0 {
+        // A tick runs as soon as its stretch has begun, so what is drawn is
+        // never behind it: at full speed one tick per vblank, drawn whole.
+        while clock > 0.0 {
             game.tick(&frame);
             clock -= 1.0;
             if !ticked {
@@ -163,9 +166,12 @@ fn psp_main() {
             }
         }
 
+        // How far into the last tick this vblank stands; under 1 only while
+        // the world is slowed, and then drawn partway so it slides.
+        let alpha = 1.0 + clock;
         unsafe {
             gfx::begin_frame(gfx::pack(game.background.to_rgb()));
-            render::render(&game);
+            game.with_blend(alpha, |g| render::render(g));
             gfx::end_frame();
         }
     }

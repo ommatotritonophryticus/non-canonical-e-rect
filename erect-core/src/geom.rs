@@ -34,7 +34,7 @@ impl Viewport {
 }
 
 /// An axis-aligned box. Every collidable thing in the game is one of these.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Body {
     pub x: f32,
     pub y: f32,

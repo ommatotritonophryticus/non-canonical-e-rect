@@ -214,7 +214,11 @@ async fn main() {
         let pads = frame.pads_connected;
 
         let mut ticked = false;
-        while accumulator >= TICK_SECONDS {
+        // A tick runs as soon as its stretch of time has begun rather than
+        // once it is over, so the simulation is never behind what is drawn:
+        // a frame shows the way through the last tick it is, and at full
+        // speed that is all of it - the state as it stands, no added delay.
+        while accumulator > 0.0 {
             #[cfg(all(feature = "harness", not(target_arch = "wasm32")))]
             if let Some(h) = harness.as_ref() {
                 h.before_tick(&mut game);
@@ -282,14 +286,18 @@ async fn main() {
         // on a phone everything outside the field stays the black the pad is
         // drawn on.
         clear_background(BLACK);
+        // How far into the tick that last ran this frame stands: 1 when the
+        // accumulator is spent, less when a slowed world has time still owed
+        // on it. Drawn there, so slowing down slides instead of stuttering.
+        let alpha = (1.0 + accumulator / TICK_SECONDS) as f32;
         if phone_layout {
             let camera = pad.layout().camera(win_h);
             set_camera(&camera);
-            renderer.render(&game, pads);
+            game.with_blend(alpha, |g| renderer.render(g, pads));
             set_default_camera();
             pad.draw(&renderer.font);
         } else {
-            renderer.render(&game, pads);
+            game.with_blend(alpha, |g| renderer.render(g, pads));
         }
         #[cfg(all(feature = "harness", not(target_arch = "wasm32")))]
         if let Some(h) = harness.as_mut() {

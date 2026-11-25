@@ -188,6 +188,13 @@ pub const GUN_MAX_REACH_PCT: f32 = 60.0;
 /// between it is a straight line - see [`crate::game::Game::time_scale`].
 pub const PIERCE_SLOW_MIN: f32 = 0.25;
 
+/// Further than this in one tick, as a percentage of the view's width, and a
+/// box is drawn where it ended up rather than sliding there. Nothing that moves
+/// on its own covers more than a few percent a tick - a thrown square is the
+/// fastest at four - so past this it was put somewhere: a blink, a respawn, the
+/// camera snapping to a new run.
+pub const BLEND_JUMP_PCT: f32 = 10.0;
+
 /// What one wall takes off anything that is not a boss.
 ///
 /// Flat, and just past the 255 every ordinary enemy carries, so the wall still
