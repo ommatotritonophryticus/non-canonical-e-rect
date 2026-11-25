@@ -188,6 +188,11 @@ pub const GUN_MAX_REACH_PCT: f32 = 60.0;
 /// between it is a straight line - see [`crate::game::Game::time_scale`].
 pub const PIERCE_SLOW_MIN: f32 = 0.25;
 
+/// How far inside the tip of a lunge what it carries is held, as a percentage
+/// of the lunge's length at that moment. Inside rather than at the edge, so it
+/// is still in the box on the next tick and the swing goes on landing.
+pub const LUNGE_CARRY_PCT: f32 = 1.0;
+
 /// Further than this in one tick, as a percentage of the view's width, and a
 /// box is drawn where it ended up rather than sliding there. Nothing that moves
 /// on its own covers more than a few percent a tick - a thrown square is the

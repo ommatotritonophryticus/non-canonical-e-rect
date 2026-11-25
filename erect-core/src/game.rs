@@ -2440,6 +2440,23 @@ impl Game {
         false
     }
 
+    /// Where an enemy caught by a carrying swing is held: just inside the tip,
+    /// by [`LUNGE_CARRY_PCT`] of the swing's length, on the far side of the
+    /// player. `None` when it already stands further out than that - a carry
+    /// pushes, it never pulls anything back in.
+    fn carried_x(&self, attacker: usize, enemy: &Body) -> Option<f32> {
+        let p = &self.players[attacker];
+        let gun = p.gun;
+        let inset = gun.w * LUNGE_CARRY_PCT / 100.0;
+        if p.facing_right {
+            let x = gun.x + gun.w - inset;
+            (enemy.x < x).then_some(x)
+        } else {
+            let x = gun.x + inset - enemy.w;
+            (enemy.x > x).then_some(x)
+        }
+    }
+
     /// The living player whose melee box or ultimate field is touching `body`.
     fn find_attacker(&self, body: &Body) -> Option<(usize, HitSource)> {
         for (i, p) in self.players.iter().enumerate() {
@@ -2607,6 +2624,12 @@ impl Game {
                     // used to scale with the enemy's own health, which made a
                     // boss travel three times as far from a hit as a runt did.
                     self.zombies[i].ax = dir * v.wper(PLAYER_MOVE_PCT) * push;
+                }
+                if source == HitSource::Swing && kind.carries() {
+                    let body = self.zombies[i].body;
+                    if let Some(x) = self.carried_x(attacker, &body) {
+                        self.zombies[i].body.x = x;
+                    }
                 }
                 // A mastered trap is a gate rather than a nudge: what walks
                 // into it is thrown back out the side it came in, along the
@@ -3405,12 +3428,21 @@ impl Game {
                     created_at: self.timer,
                 });
                 let attacker_x = self.players[attacker].body.x;
-                self.flyers[i].ay = -v.hper(2.0);
-                self.flyers[i].ax = if fx > attacker_x {
-                    v.wper(0.5)
+                if source == HitSource::Swing && self.players[attacker].attack.carries() {
+                    // Carried on the tip rather than thrown, the same as an
+                    // enemy on the ground.
+                    let body = self.flyers[i].body;
+                    if let Some(x) = self.carried_x(attacker, &body) {
+                        self.flyers[i].body.x = x;
+                    }
                 } else {
-                    -v.wper(0.5)
-                };
+                    self.flyers[i].ay = -v.hper(2.0);
+                    self.flyers[i].ax = if fx > attacker_x {
+                        v.wper(0.5)
+                    } else {
+                        -v.wper(0.5)
+                    };
+                }
                 // Swing damage, so only a swing pays it - the wall has already
                 // taken its share above. What a swing is worth depends on what
                 // the player is carrying, and a bullet or a trap carries its

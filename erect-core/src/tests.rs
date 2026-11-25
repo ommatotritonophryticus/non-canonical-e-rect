@@ -9428,3 +9428,138 @@ fn drawing_blended_frames_does_not_change_the_simulation() {
         assert_eq!(a.body, b.body);
     }
 }
+
+/* ---------------- the lunge carries ---------------- */
+
+/// Player 0 at the first tick of a lunge the given way, on a clear field.
+fn lunging(facing_right: bool) -> Game {
+    let mut game = new_game();
+    game.start_run(1);
+    settle_on_floor(&mut game);
+    clear_arena(&mut game);
+    let p = &mut game.players[0];
+    p.attack = AttackKind::Lunge;
+    p.attack_level = 1;
+    p.facing_right = facing_right;
+    p.attack_ticks = AttackKind::Lunge.swing_ticks(ATTACK_TICKS);
+    p.strike_id = p.strike_id.wrapping_add(1).max(1);
+    let v = game.viewport;
+    let wave = game.wave;
+    game.players[0].update_gun(&v, 1.0, wave);
+    game
+}
+
+/// A tough zombie inside the lunge's box, right against the player.
+fn zombie_in_lunge(game: &mut Game) {
+    let v = game.viewport;
+    let gun = game.players[0].gun;
+    let mut z = Zombie::from_edge(&v, &mut game.rng, TEST_ENEMY_COLOR);
+    z.hp = 100_000.0;
+    z.hpmax = 100_000.0;
+    z.body.y = gun.y;
+    z.body.x = if game.players[0].facing_right { gun.x } else { gun.x + gun.w - z.body.w };
+    game.zombies.push(z);
+}
+
+/// Where the carry should hold `enemy`: just inside the tip.
+fn carry_point(game: &Game, enemy: &Body) -> f32 {
+    let gun = game.players[0].gun;
+    let inset = gun.w * LUNGE_CARRY_PCT / 100.0;
+    if game.players[0].facing_right {
+        gun.x + gun.w - inset
+    } else {
+        gun.x + inset - enemy.w
+    }
+}
+
+#[test]
+fn a_lunge_holds_what_it_catches_just_inside_its_tip() {
+    for facing_right in [true, false] {
+        let mut game = lunging(facing_right);
+        zombie_in_lunge(&mut game);
+        let hp = game.zombies[0].hp;
+        game.tick(&idle());
+        let z = &game.zombies[0];
+        let want = carry_point(&game, &z.body);
+        // Within a step of walking: the enemy still takes its own turn.
+        assert!(
+            (z.body.x - want).abs() <= game.viewport.wper(PLAYER_MOVE_PCT * 2.0),
+            "facing right {facing_right}: at {} rather than {want}",
+            z.body.x
+        );
+        assert!(z.body.intersects(&game.players[0].gun), "still in the box");
+        assert!(z.hp < hp, "and it was hurt");
+        assert!(z.ay >= 0.0, "not thrown up");
+    }
+}
+
+#[test]
+fn a_lunge_carries_its_catch_out_as_it_reaches_and_keeps_landing() {
+    let mut game = lunging(true);
+    zombie_in_lunge(&mut game);
+    game.tick(&idle());
+    let mut x = game.zombies[0].body.x;
+    let mut hp = game.zombies[0].hp;
+    let mut carried = 0;
+    while game.players[0].attacking() {
+        game.tick(&idle());
+        let z = &game.zombies[0];
+        if !game.players[0].attacking() {
+            break;
+        }
+        assert!(z.body.x > x, "it should move out with the tip");
+        assert!(z.hp < hp, "and take the swing every tick it is held");
+        x = z.body.x;
+        hp = z.hp;
+        carried += 1;
+    }
+    assert!(carried > 3, "the premise: a lunge lasts more than a few ticks");
+}
+
+#[test]
+fn once_the_lunge_is_over_what_it_carried_walks_back_in() {
+    let mut game = lunging(true);
+    zombie_in_lunge(&mut game);
+    while game.players[0].attacking() {
+        game.tick(&idle());
+    }
+    let released = game.zombies[0].body.x;
+    for _ in 0..60 {
+        game.tick(&idle());
+    }
+    assert!(game.zombies[0].body.x < released, "it should come back toward the player");
+}
+
+#[test]
+fn a_lunge_carries_a_flyer_too() {
+    let mut game = lunging(true);
+    let gun = game.players[0].gun;
+    let size_ref = game.players[0].body;
+    let timer = game.timer;
+    let mut f = Flyer::from_edge(&game.viewport, &size_ref, timer, &mut game.rng);
+    f.hp = 100_000.0;
+    f.hpmax = 100_000.0;
+    f.body.x = gun.x;
+    f.body.y = gun.y;
+    f.ax = 0.0;
+    f.ay = 0.0;
+    game.flyers.push(f);
+    game.tick(&idle());
+    let f = &game.flyers[0];
+    assert!(f.ay > -game.viewport.hper(2.0), "not thrown up");
+    let want = carry_point(&game, &f.body);
+    assert!(
+        (f.body.x - want).abs() <= game.viewport.wper(2.0),
+        "held at the tip: at {} rather than {want}",
+        f.body.x
+    );
+}
+
+#[test]
+fn only_the_lunge_carries() {
+    for kind in AttackKind::EVERY {
+        assert_eq!(kind.carries(), kind == AttackKind::Lunge, "{kind:?}");
+    }
+    assert_eq!(AttackKind::Lunge.knockback_scale(1), 0.0);
+    assert_eq!(AttackKind::Lunge.lift_scale(), 0.0);
+}

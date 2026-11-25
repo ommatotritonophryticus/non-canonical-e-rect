@@ -49,6 +49,11 @@ pub enum AttackKind {
     /// Starts short and reaches further every tick of the swing. Distant
     /// targets are only caught at the end, so it wants the player standing
     /// still.
+    ///
+    /// It does not throw what it catches. It carries it: the enemy is held at
+    /// the tip as the tip reaches out, inside it by [`crate::config::LUNGE_CARRY_PCT`]
+    /// of the length so the swing keeps landing, and when the swing is over it
+    /// is simply further away and walks back in.
     Lunge,
     /// One guaranteed hit per enemy per swing, for what an ordinary swing does
     /// at its best rather than at its average. Trades the ceiling for a floor.
@@ -335,6 +340,8 @@ impl AttackKind {
             // Without it the enemy stays and takes the whole swing - and stays
             // in touching range while doing it.
             AttackKind::Piercing => 0.0,
+            // It carries instead; see [`AttackKind::carries`].
+            AttackKind::Lunge => 0.0,
             // Mastered, the sweep stops being a sword that swings both ways and
             // becomes the thing that decides how much floor the player owns:
             // what it touches leaves on both sides at once.
@@ -352,9 +359,15 @@ impl AttackKind {
     pub fn lift_scale(self) -> f32 {
         match self {
             AttackKind::Hammer => 2.0,
-            AttackKind::Piercing => 0.0,
+            AttackKind::Piercing | AttackKind::Lunge => 0.0,
             _ => 1.0,
         }
+    }
+
+    /// True when a swing moves what it hits along with its tip instead of
+    /// throwing it.
+    pub fn carries(self) -> bool {
+        matches!(self, AttackKind::Lunge)
     }
 
     /// True when one swing may only hit a given enemy once.
