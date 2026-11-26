@@ -95,7 +95,10 @@ fn psp_main() {
     let mut pending = InputFrame::default();
 
     loop {
-        let mut frame = unsafe { pad.read() };
+        // The one player's layout, looked up rather than collected into a list:
+        // a list would be an allocation every frame.
+        let binds = game.bindings(game.settings.players[0].scheme);
+        let mut frame = unsafe { pad.read(&binds) };
         frame.merge(&pending);
         clock += game.time_scale();
         let mut ticked = false;

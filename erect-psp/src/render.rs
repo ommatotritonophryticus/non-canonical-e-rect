@@ -62,6 +62,8 @@ pub unsafe fn render(game: &Game) {
             State::Campaigns => render_campaigns(game),
             State::DevMenu => render_dev_menu(game),
             State::Title => render_title(game),
+            State::Help | State::Credits => render_text(game),
+            State::Controls => render_controls(game),
         }
 
         if let Some(result) = game.result {
@@ -169,6 +171,76 @@ unsafe fn render_settings(game: &Game) {
         centered("SETTINGS", 16.0, v.hper(10.0), WHITE, game);
         render_menu(game, &game.settings_menu);
         centered("LEFT/RIGHT CHANGE   O BACK", 88.0, v.hper(5.0), GREY, game);
+    }
+}
+
+/// See the desktop renderer.
+unsafe fn render_controls(game: &Game) {
+    unsafe {
+        let v = &game.viewport;
+        centered("CONTROLS", 14.0, v.hper(10.0), WHITE, game);
+        render_menu(game, &game.controls_menu);
+        centered(game.controls_hint(), 88.0, v.hper(4.5), WHITE, game);
+        if game.capturing.is_none() {
+            centered("O BACK", 94.0, v.hper(4.5), GREY, game);
+        }
+    }
+}
+
+/// Where the help and credits text sits; see the desktop renderer, which uses
+/// the same numbers. At the readable floor the text is 11px on 13.6px lines.
+const TEXT_TOP_PCT: f32 = 28.0;
+const TEXT_PITCH_PCT: f32 = 5.0;
+const TEXT_SIZE_PCT: f32 = 3.8;
+const TEXT_LEFT_PCT: f32 = 6.0;
+
+/// See the desktop renderer.
+unsafe fn render_text(game: &Game) {
+    unsafe {
+        let v = &game.viewport;
+        let help = game.state == State::Help;
+        let title = if help { "HOW TO PLAY" } else { "CREDITS" };
+        centered(title, 13.0, v.hper(9.0), WHITE, game);
+        if help {
+            let lang = format!("< {} >", game.help_lang.label());
+            centered(&lang, 20.0, v.hper(4.5), GREY, game);
+        }
+
+        let size = readable(v.hper(TEXT_SIZE_PCT));
+        let x = v.wper(TEXT_LEFT_PCT);
+        // See the desktop renderer. Opaque here: a flat rectangle is the one
+        // thing this renderer draws without blending.
+        let pad = 4.0;
+        gfx::rect(
+            x - pad,
+            v.hper(TEXT_TOP_PCT) - size - pad,
+            v.w - 2.0 * (x - pad),
+            v.hper(TEXT_PITCH_PCT) * Game::TEXT_LINES as f32 + pad,
+            0xff10_1010,
+        );
+        let shown = game.text.iter().skip(game.text_scroll).take(Game::TEXT_LINES);
+        for (i, line) in shown.enumerate() {
+            let color = if line.heading { WHITE } else { GREY };
+            let y = v.hper(TEXT_TOP_PCT + i as f32 * TEXT_PITCH_PCT);
+            gfx::text_shadowed(x, y, size, color, &line.text);
+        }
+
+        let total = game.text.len().max(1) as f32;
+        let track_top = v.hper(TEXT_TOP_PCT) - size;
+        let track_h = v.hper(TEXT_PITCH_PCT) * Game::TEXT_LINES as f32;
+        let bar_x = v.wper(100.0 - TEXT_LEFT_PCT / 2.0);
+        let bar_w = 2.0;
+        gfx::rect(bar_x, track_top, bar_w, track_h, DIM);
+        let thumb_h = (track_h * Game::TEXT_LINES as f32 / total).min(track_h);
+        let thumb_y = track_top + track_h * game.text_scroll as f32 / total;
+        gfx::rect(bar_x, thumb_y, bar_w, thumb_h, WHITE);
+
+        let hint = if help {
+            "UP/DOWN SCROLL   LEFT/RIGHT LANGUAGE   O BACK"
+        } else {
+            "UP/DOWN SCROLL   O BACK"
+        };
+        centered(hint, 92.0, v.hper(4.5), GREY, game);
     }
 }
 

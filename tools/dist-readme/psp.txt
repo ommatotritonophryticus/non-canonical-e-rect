@@ -44,10 +44,14 @@ Controls
     Start                pause menu
     Home                 quit
 
+These are the buttons the game ships with. SETTINGS > CONTROLS moves any of the
+six game actions to other buttons or the nub, up to three for each, and one
+button may serve several actions. Start and the menus keep the buttons above.
+
 One player: a PSP has one controller, so the 2 PLAYERS mode is not offered.
 
 Saves
 -----
-Settings, high scores and which HEAD STARTs are unlocked are written to
-settings.dat beside the EBOOT. How far each weapon run got is shown for the
-current session only; it is not kept between launches on the PSP.
+Settings, high scores, the controls and which HEAD STARTs are unlocked are
+written to settings.dat beside the EBOOT. How far each weapon run got is shown
+for the current session only; it is not kept between launches on the PSP.

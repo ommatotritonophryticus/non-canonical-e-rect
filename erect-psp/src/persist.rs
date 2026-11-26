@@ -4,6 +4,7 @@
 //! corrupt or truncated file simply falls back to defaults.
 
 use erect_core::attack::AttackKind;
+use erect_core::binds::{Action, Bindings, SLOTS};
 use erect_core::settings::Settings;
 use psp::sys::{self, IoOpenFlags};
 
@@ -16,14 +17,19 @@ const FALLBACK_PATH: &[u8] = b"ms0:/PSP/GAME/ERECT/settings.dat\0";
 const FALLBACK_DIR: &[u8] = b"ms0:/PSP/GAME/ERECT\0";
 /// Bumped whenever the layout below changes, so a file is never read with the
 /// wrong one.
-const MAGIC: u32 = 0x4552_4304;
-/// The layout before head starts were locked: the same fields, without the
-/// unlock mask on the end. Still read, so updating keeps records and settings.
+const MAGIC: u32 = 0x4552_4305;
+/// The layouts before this one, still read so that updating keeps records and
+/// settings. 3 is the original record; 4 added one bit per weapon for which
+/// head starts are open, by `AttackKind::index`.
 const MAGIC_V3: u32 = 0x4552_4303;
 const RECORD_LEN_V3: usize = 4 + 4 + 4 + 8 + 8 + 4 + 4 + 8;
-/// The current layout: the old record, then one bit per weapon for which head
-/// starts are open, by `AttackKind::index`.
-const RECORD_LEN: usize = RECORD_LEN_V3 + 4;
+const MAGIC_V4: u32 = 0x4552_4304;
+const RECORD_LEN_V4: usize = RECORD_LEN_V3 + 4;
+/// The current layout: version 4, then the pad's buttons if the player changed
+/// them - a word that is 1 when they did, and every action's slots as `u16`s,
+/// action by action.
+const BINDINGS_LEN: usize = Action::EVERY.len() * SLOTS * 2;
+const RECORD_LEN: usize = RECORD_LEN_V4 + 4 + BINDINGS_LEN;
 // A weapon past the 32nd would have no bit to be saved in.
 const _: () = assert!(AttackKind::EVERY.len() <= 32);
 
@@ -43,17 +49,30 @@ pub fn load() -> Settings {
         sys::sceIoClose(fd);
         let len = match u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) {
             MAGIC => RECORD_LEN,
+            MAGIC_V4 => RECORD_LEN_V4,
             MAGIC_V3 => RECORD_LEN_V3,
             _ => return settings,
         };
         if read < len as i32 {
             return settings;
         }
-        if len == RECORD_LEN {
+        if len >= RECORD_LEN_V4 {
             let mask = u32::from_le_bytes([buf[44], buf[45], buf[46], buf[47]]);
             for (i, open) in settings.head_start_unlocked.iter_mut().enumerate() {
                 *open = mask & (1 << i) != 0;
             }
+        }
+        if len >= RECORD_LEN && u32::from_le_bytes([buf[48], buf[49], buf[50], buf[51]]) == 1 {
+            let mut binds = Bindings::default();
+            let mut at = 52;
+            for action in Action::EVERY {
+                for slot in 0..SLOTS {
+                    binds.set(action, slot, u16::from_le_bytes([buf[at], buf[at + 1]]));
+                    at += 2;
+                }
+            }
+            // Game::new drops any button this build does not have.
+            settings.bindings[0] = Some(binds);
         }
     }
 
@@ -94,6 +113,16 @@ pub fn save(settings: &Settings) {
         }
     }
     buf[44..48].copy_from_slice(&mask.to_le_bytes());
+    if let Some(binds) = settings.bindings[0] {
+        buf[48..52].copy_from_slice(&1u32.to_le_bytes());
+        let mut at = 52;
+        for action in Action::EVERY {
+            for slot in 0..SLOTS {
+                buf[at..at + 2].copy_from_slice(&binds.get(action, slot).to_le_bytes());
+                at += 2;
+            }
+        }
+    }
 
     unsafe {
         let flags = || IoOpenFlags::CREAT | IoOpenFlags::TRUNC | IoOpenFlags::WR_ONLY;

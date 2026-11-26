@@ -28,16 +28,29 @@ use crate::input::{InputFrame, PlayerIntent};
 use crate::settings::{SchemeInfo, Settings};
 use crate::waves::{pick_ground, GroundKind, WaveAction, WaveKind, WaveManager, WaveRule};
 
+/// The buttons the test schemes have: eight, named for their numbers.
+const TEST_BUTTONS: [&str; 8] = ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"];
+
+/// Every test scheme's layout: one button per action, numbered in action order.
+const TEST_DEFAULTS: crate::binds::Bindings = crate::binds::Bindings::new([
+    [0, crate::binds::NONE, crate::binds::NONE],
+    [1, crate::binds::NONE, crate::binds::NONE],
+    [2, crate::binds::NONE, crate::binds::NONE],
+    [3, crate::binds::NONE, crate::binds::NONE],
+    [4, crate::binds::NONE, crate::binds::NONE],
+    [5, crate::binds::NONE, crate::binds::NONE],
+]);
+
+const fn test_scheme(label: &'static str, is_gamepad: bool) -> SchemeInfo {
+    SchemeInfo { label, is_gamepad, pad_index: 0, buttons: &TEST_BUTTONS, defaults: TEST_DEFAULTS }
+}
+
 /// Stand-in for a desktop's scheme list: two keyboards plus a pad.
-static TEST_SCHEMES: [SchemeInfo; 3] = [
-    SchemeInfo { label: "KB A", is_gamepad: false, pad_index: 0 },
-    SchemeInfo { label: "KB B", is_gamepad: false, pad_index: 0 },
-    SchemeInfo { label: "PAD 1", is_gamepad: true, pad_index: 0 },
-];
+static TEST_SCHEMES: [SchemeInfo; 3] =
+    [test_scheme("KB A", false), test_scheme("KB B", false), test_scheme("PAD 1", true)];
 
 /// A platform that can only seat one player, like the PSP.
-static SINGLE_SCHEME: [SchemeInfo; 1] =
-    [SchemeInfo { label: "PAD", is_gamepad: true, pad_index: 0 }];
+static SINGLE_SCHEME: [SchemeInfo; 1] = [test_scheme("PAD", true)];
 
 /// Colour for enemies a test builds by hand. In the game a plain enemy wears a
 /// player's colour; nothing under test cares which, so this keeps the call
@@ -9648,4 +9661,295 @@ fn the_auto_attack_is_not_offered_to_a_player_who_throws() {
     }
     assert!(offered_to_a_swinger, "it should still come up for everyone else");
     assert_eq!(Boon::AutoAttack.label(), "AUTO ATTACK");
+}
+
+/* ---------------- controls ---------------- */
+
+use crate::binds::{Action, Bindings, NONE as NO_BUTTON, SLOTS};
+
+/// The controls screen, opened on scheme 0, with the highlight on `action`'s
+/// row and `slot` picked.
+fn controls_on(action: Action, slot: usize) -> Game {
+    let mut game = new_game();
+    game.open_controls();
+    game.controls_menu.index = action.index() + 1;
+    game.controls_slot = slot;
+    game
+}
+
+fn press_confirm(game: &mut Game) {
+    let mut frame = idle();
+    frame.menu.confirm = true;
+    game.tick(&frame);
+}
+
+fn press_raw(game: &mut Game, button: u16) {
+    let mut frame = idle();
+    frame.raw[game.controls_scheme] = Some(button);
+    game.tick(&frame);
+}
+
+#[test]
+fn settings_and_title_reach_the_new_screens() {
+    use crate::menu::MenuAction;
+    let mut game = new_game();
+    let title = game.menu_rows([false; MAX_PLAYERS]);
+    assert!(title.iter().any(|r| r.action == MenuAction::OpenHelp));
+    assert!(title.iter().any(|r| r.action == MenuAction::OpenCredits));
+    game.state = State::Settings;
+    let settings = game.menu_rows([false; MAX_PLAYERS]);
+    assert!(settings.iter().any(|r| r.action == MenuAction::OpenControls));
+}
+
+#[test]
+fn every_menu_ends_above_the_floor() {
+    for state in [State::Title, State::Settings, State::Controls] {
+        let mut game = new_game();
+        game.state = state;
+        let rows = game.menu_rows([true, true]).len();
+        let menu = match state {
+            State::Title => &game.title_menu,
+            State::Settings => &game.settings_menu,
+            _ => &game.controls_menu,
+        };
+        let last = menu.row_y_pct(rows - 1);
+        assert!(last < GROUND_Y_PCT, "{state:?}: the last of {rows} rows is at {last}%");
+    }
+}
+
+#[test]
+fn a_button_pressed_while_waiting_goes_into_the_picked_slot() {
+    let mut game = controls_on(Action::Jump, 1);
+    game.settings.dirty = false;
+    press_confirm(&mut game);
+    assert_eq!(game.capturing, Some(Action::Jump), "confirm should start waiting");
+    press_raw(&mut game, 6);
+    assert_eq!(game.capturing, None);
+    let binds = game.bindings(0);
+    assert_eq!(binds.get(Action::Jump, 1), 6);
+    assert_eq!(binds.get(Action::Jump, 0), TEST_DEFAULTS.get(Action::Jump, 0), "slot 0 kept");
+    assert!(game.settings.bindings[0].is_some(), "the scheme is now a changed one");
+    assert!(game.settings.dirty, "and it has to be saved");
+}
+
+#[test]
+fn the_press_that_starts_the_wait_is_not_what_gets_bound() {
+    // The confirm button is usually a game button too - Space, Enter, Cross -
+    // and it is down on the frame that opens the wait.
+    let mut game = controls_on(Action::Attack, 0);
+    let mut frame = idle();
+    frame.menu.confirm = true;
+    frame.raw[0] = Some(7);
+    game.tick(&frame);
+    assert_eq!(game.capturing, Some(Action::Attack));
+    assert_eq!(game.bindings(0), TEST_DEFAULTS, "nothing was bound yet");
+}
+
+#[test]
+fn pause_while_waiting_empties_the_slot() {
+    let mut game = controls_on(Action::Dash, 0);
+    press_confirm(&mut game);
+    let mut frame = idle();
+    frame.pause = true;
+    game.tick(&frame);
+    assert_eq!(game.capturing, None);
+    assert_eq!(game.bindings(0).get(Action::Dash, 0), NO_BUTTON);
+    assert_eq!(game.state, State::Controls, "and the screen stays where it is");
+}
+
+#[test]
+fn the_menu_does_not_move_while_waiting() {
+    let mut game = controls_on(Action::Jump, 0);
+    press_confirm(&mut game);
+    let index = game.controls_menu.index;
+    let mut frame = idle();
+    frame.menu.down = true;
+    frame.menu.back = true;
+    game.tick(&frame);
+    assert_eq!(game.controls_menu.index, index);
+    assert_eq!(game.state, State::Controls, "back is a button like any other here");
+}
+
+#[test]
+fn one_button_may_stand_on_several_actions_and_twice_on_one() {
+    let mut game = controls_on(Action::Jump, 1);
+    press_confirm(&mut game);
+    press_raw(&mut game, 3); // attack's own button, now on jump as well
+    game.controls_menu.index = Action::Jump.index() + 1;
+    game.controls_slot = 2;
+    press_confirm(&mut game);
+    press_raw(&mut game, 3); // and in a second slot of the same action
+    let binds = game.bindings(0);
+    assert_eq!(binds.get(Action::Jump, 1), 3);
+    assert_eq!(binds.get(Action::Jump, 2), 3);
+    assert_eq!(binds.get(Action::Attack, 0), 3, "attack keeps it");
+    assert!(binds.any(Action::Jump, |b| b == 3) && binds.any(Action::Attack, |b| b == 3));
+}
+
+#[test]
+fn left_and_right_pick_a_slot_and_wrap() {
+    let mut game = controls_on(Action::Left, 0);
+    let mut left = idle();
+    left.menu.left = true;
+    game.tick(&left);
+    assert_eq!(game.controls_slot, SLOTS - 1);
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    assert!(rows[Action::Left.index() + 1].label.contains('['), "the picked slot is marked");
+}
+
+#[test]
+fn reset_puts_the_scheme_back_as_it_ships() {
+    use crate::menu::MenuAction;
+    let mut game = controls_on(Action::Slam, 0);
+    press_confirm(&mut game);
+    press_raw(&mut game, 7);
+    assert_ne!(game.bindings(0), TEST_DEFAULTS);
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    game.controls_menu.index =
+        rows.iter().position(|r| r.action == MenuAction::ResetControls).unwrap();
+    press_confirm(&mut game);
+    assert_eq!(game.settings.bindings[0], None);
+    assert_eq!(game.bindings(0), TEST_DEFAULTS);
+}
+
+#[test]
+fn a_player_plays_with_their_schemes_layout() {
+    let mut game = new_game();
+    let mut custom = TEST_DEFAULTS;
+    custom.set(Action::Jump, 0, 7);
+    game.settings.bindings[1] = Some(custom);
+    game.settings.players[0].scheme = 1;
+    // A run's players take their scheme from the settings when it starts.
+    game.start_run(1);
+    let controls = game.player_controls();
+    assert_eq!(controls[0], (1, custom));
+}
+
+#[test]
+fn a_saved_layout_keeps_only_buttons_the_platform_has() {
+    let mut settings = Settings::default();
+    let mut binds = Bindings::default();
+    binds.set(Action::Jump, 0, 2);
+    binds.set(Action::Jump, 1, 999);
+    settings.bindings[0] = Some(binds);
+    settings.bindings[3] = Some(binds); // a scheme the platform does not have
+    let game = Game::new(Viewport::new(1280.0, 800.0), 1, settings, &TEST_SCHEMES, 2);
+    let kept = game.settings.bindings[0].unwrap();
+    assert_eq!(kept.get(Action::Jump, 0), 2);
+    assert_eq!(kept.get(Action::Jump, 1), NO_BUTTON, "a button past the table is dropped");
+    assert_eq!(game.settings.bindings[3], None);
+}
+
+#[test]
+fn back_from_controls_is_settings_on_its_own_row() {
+    use crate::menu::MenuAction;
+    let mut game = new_game();
+    game.open_controls();
+    let mut frame = idle();
+    frame.menu.back = true;
+    game.tick(&frame);
+    assert_eq!(game.state, State::Settings);
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    assert_eq!(rows[game.settings_menu.index].action, MenuAction::OpenControls);
+}
+
+#[test]
+fn a_raw_press_survives_a_frame_that_ran_no_tick() {
+    let mut frame = idle();
+    frame.raw[2] = Some(4);
+    let kept = frame.edges_only();
+    let mut next = idle();
+    next.merge(&kept);
+    assert_eq!(next.raw[2], Some(4));
+    next.clear_edges();
+    assert_eq!(next.raw[2], None, "it belongs to one tick");
+}
+
+/* ---------------- help and credits ---------------- */
+
+#[test]
+fn every_line_of_every_text_fits_the_wrap() {
+    let texts = [
+        crate::text::help(crate::text::Lang::En),
+        crate::text::help(crate::text::Lang::Ru),
+        crate::text::credits("0.3.0"),
+    ];
+    for text in texts.iter() {
+        assert!(text.len() > Game::TEXT_LINES, "long enough to scroll");
+        for line in text {
+            assert!(
+                line.text.chars().count() <= crate::text::WRAP,
+                "too long: {:?}",
+                line.text
+            );
+        }
+    }
+}
+
+#[test]
+fn the_russian_help_is_in_russian_and_the_english_is_not() {
+    let cyrillic = |t: &[crate::text::Line]| {
+        t.iter().any(|l| l.text.chars().any(|c| ('\u{400}'..='\u{4FF}').contains(&c)))
+    };
+    assert!(cyrillic(&crate::text::help(crate::text::Lang::Ru)));
+    assert!(!cyrillic(&crate::text::help(crate::text::Lang::En)));
+}
+
+#[test]
+fn the_help_opens_in_english_and_left_or_right_changes_language() {
+    use crate::text::Lang;
+    let mut game = new_game();
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    game.title_menu.index =
+        rows.iter().position(|r| r.action == crate::menu::MenuAction::OpenHelp).unwrap();
+    press_confirm(&mut game);
+    assert_eq!(game.state, State::Help);
+    assert_eq!(game.help_lang, Lang::En);
+    let mut right = idle();
+    right.menu.right = true;
+    game.tick(&right);
+    assert_eq!(game.help_lang, Lang::Ru);
+    assert_eq!(game.text, crate::text::help(Lang::Ru));
+    game.tick(&right);
+    assert_eq!(game.help_lang, Lang::En, "and back round");
+}
+
+#[test]
+fn scrolling_stops_at_both_ends() {
+    let mut game = new_game();
+    game.open_text(State::Help, crate::text::Lang::En);
+    let mut up = idle();
+    up.menu.up = true;
+    game.tick(&up);
+    assert_eq!(game.text_scroll, 0);
+    let mut down = idle();
+    down.menu.down = true;
+    for _ in 0..200 {
+        game.tick(&down);
+    }
+    assert_eq!(game.text_scroll, game.text_scroll_max());
+    assert!(game.text_scroll_max() > 0);
+}
+
+#[test]
+fn the_credits_name_the_version_the_author_and_the_licences() {
+    let text: alloc::vec::Vec<String> =
+        crate::text::credits("9.9.9").into_iter().map(|l| l.text).collect();
+    let all = text.join(" ");
+    assert!(all.contains("9.9.9"));
+    assert!(all.contains(crate::text::AUTHOR));
+    assert!(all.contains("GNU General Public License"));
+    assert!(all.contains("SIL Open Font License"));
+}
+
+#[test]
+fn back_from_a_text_screen_lands_on_its_row() {
+    let mut game = new_game();
+    game.open_text(State::Credits, crate::text::Lang::En);
+    let mut back = idle();
+    back.menu.back = true;
+    game.tick(&back);
+    assert_eq!(game.state, State::Title);
+    let rows = game.menu_rows([false; MAX_PLAYERS]);
+    assert_eq!(rows[game.title_menu.index].action, crate::menu::MenuAction::OpenCredits);
 }

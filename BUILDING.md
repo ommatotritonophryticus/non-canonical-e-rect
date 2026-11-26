@@ -330,7 +330,7 @@ cargo test
 ```
 
 Runs on the host and covers `erect-core`, `erect-audio` and the desktop
-frontend's settings file — 425 tests at 0.3. The frontends are otherwise mostly
+frontend's settings file — 445 tests at 0.3. The frontends are otherwise mostly
 not covered; drawing is the part a test cannot see.
 
 `erect-psp` is excluded from the workspace, because it only builds for
@@ -374,7 +374,7 @@ with `ERECT_HARNESS` set, comma separated:
 | `once` | press attack once on the first frame and never again |
 | `alive` | keep the players standing |
 | `boons` | hand the players every boon, at both levels |
-| `screen=dev\|title\|campaigns\|campaigns2\|campaigns3` | open that menu instead of playing, to look at a layout; the three `campaigns` open the weapon-runs screen on the tutorial, the campaign and the head start |
+| `screen=dev\|title\|campaigns\|campaigns2\|campaigns3\|help\|helpru\|credits\|controls` | open that screen instead of playing, to look at a layout; the three `campaigns` open the weapon-runs screen on the tutorial, the campaign and the head start, and `helpru` opens HOW TO PLAY in Russian |
 | `wall=pull\|push` | give them a modified wall and raise one every 90 ticks |
 | `fight` | swing and follow the nearest enemy |
 

@@ -40,6 +40,14 @@ const CAP_PROBE_PX: u16 = 100;
 /// because "not yet" has to read differently from "secondary".
 const OFFER_INERT: Color = Color::new(0.42, 0.42, 0.42, 1.0);
 
+/// Where the help and credits text sits, as percentages of the view: the first
+/// line's baseline, the distance between lines, the text's height and the left
+/// margin. Eleven lines at these end at 78%, above the floor line.
+const TEXT_TOP_PCT: f32 = 28.0;
+const TEXT_PITCH_PCT: f32 = 5.0;
+const TEXT_SIZE_PCT: f32 = 3.8;
+const TEXT_LEFT_PCT: f32 = 8.0;
+
 /// The dimmed white every hint and secondary line in the game uses.
 const GREY_TEXT: Color = Color::new(0.78, 0.78, 0.78, 1.0);
 /// A menu row that is there but cannot be used yet. Darker than an unselected
@@ -268,6 +276,8 @@ impl Renderer {
             State::Campaigns => self.render_campaigns(game, pads_connected),
             State::DevMenu => self.render_dev_menu(game, pads_connected),
             State::Title => self.render_title(game, pads_connected),
+            State::Help | State::Credits => self.render_text(game),
+            State::Controls => self.render_controls(game, pads_connected),
         }
 
         if let Some(result) = game.result {
@@ -343,10 +353,79 @@ impl Renderer {
         self.draw_centered_shadowed(v, "SETTINGS", 16.0, v.hper(8.0), WHITE);
         self.render_menu(game, &game.settings_menu, pads_connected);
 
+        // Under the floor line: eight rows reach 76%, and the hints used to
+        // sit at 78.
         let hint = GREY_TEXT;
         let size = v.hper(3.5);
-        self.draw_centered(v, "LEFT / RIGHT TO CHANGE", 78.0, size, hint);
-        self.draw_centered(v, "ESC OR B TO GO BACK", 83.0, size, hint);
+        self.draw_centered(v, "LEFT / RIGHT TO CHANGE", 90.0, size, hint);
+        self.draw_centered(v, "ESC OR B TO GO BACK", 95.0, size, hint);
+    }
+
+    /// Which buttons play the game. The rows are the core's; what is drawn
+    /// here is the title and the line that says what the buttons do on this
+    /// screen, which changes while it is waiting for a press.
+    fn render_controls(&self, game: &Game, pads_connected: [bool; MAX_PLAYERS]) {
+        let v = &game.viewport;
+        self.draw_centered_shadowed(v, "CONTROLS", 14.0, v.hper(8.0), WHITE);
+        self.render_menu(game, &game.controls_menu, pads_connected);
+        let size = v.hper(3.5);
+        self.draw_centered(v, game.controls_hint(), 90.0, size, WHITE);
+        if game.capturing.is_none() {
+            self.draw_centered(v, "ESC OR B TO GO BACK", 95.0, size, GREY_TEXT);
+        }
+    }
+
+    /// How to play, or the credits: a window onto the core's wrapped lines,
+    /// with a bar down the side that says where in them it is.
+    fn render_text(&self, game: &Game) {
+        let v = &game.viewport;
+        let help = game.state == State::Help;
+        let title = if help { "HOW TO PLAY" } else { "CREDITS" };
+        self.draw_centered_shadowed(v, title, 13.0, v.hper(7.0), WHITE);
+        if help {
+            let lang = format!("< {} >", game.help_lang.label());
+            self.draw_centered(v, &lang, 20.0, v.hper(4.0), GREY_TEXT);
+        }
+
+        let (top, pitch) = (TEXT_TOP_PCT, TEXT_PITCH_PCT);
+        let size = v.hper(TEXT_SIZE_PCT);
+        let x = v.wper(TEXT_LEFT_PCT);
+        // A dark panel under the text: grey on the daylight sky behind the
+        // menus is a contrast nobody could read a page of.
+        let pad = v.hper(1.5);
+        draw_rectangle(
+            x - pad,
+            v.hper(top) - size - pad,
+            v.w - 2.0 * (x - pad),
+            v.hper(pitch) * Game::TEXT_LINES as f32 + pad,
+            Color::new(0.0, 0.0, 0.0, 0.72),
+        );
+        let shown = game.text.iter().skip(game.text_scroll).take(Game::TEXT_LINES);
+        for (i, line) in shown.enumerate() {
+            let color = if line.heading { WHITE } else { GREY_TEXT };
+            let y = v.hper(top + i as f32 * pitch);
+            draw_text_ex(&line.text, x + 2.0, y + 2.0, self.params(size, BLACK));
+            draw_text_ex(&line.text, x, y, self.params(size, color));
+        }
+
+        // The scroll bar: a track the height of the window, and a thumb the
+        // share of the text that is on screen.
+        let total = game.text.len().max(1) as f32;
+        let track_top = v.hper(top) - size;
+        let track_h = v.hper(pitch) * Game::TEXT_LINES as f32;
+        let bar_x = v.wper(100.0 - TEXT_LEFT_PCT / 2.0);
+        let bar_w = v.wper(0.6);
+        draw_rectangle(bar_x, track_top, bar_w, track_h, Color::new(0.0, 0.0, 0.0, 0.35));
+        let thumb_h = (track_h * Game::TEXT_LINES as f32 / total).min(track_h);
+        let thumb_y = track_top + track_h * game.text_scroll as f32 / total;
+        draw_rectangle(bar_x, thumb_y, bar_w, thumb_h, WHITE);
+
+        let hint = if help {
+            "UP / DOWN SCROLL   LEFT / RIGHT LANGUAGE   ESC BACK"
+        } else {
+            "UP / DOWN SCROLL   ESC BACK"
+        };
+        self.draw_centered(v, hint, 92.0, v.hper(3.5), GREY_TEXT);
     }
 
     /// Choosing which weapon, and which of the written runs, to spend.

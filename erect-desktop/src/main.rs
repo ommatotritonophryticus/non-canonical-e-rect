@@ -204,7 +204,7 @@ async fn main() {
         // ticks, from where the last frame left things.
         accumulator += dt * game.time_scale() as f64;
 
-        let mut frame = reader.read(&game.player_schemes());
+        let mut frame = reader.read(&game.player_controls());
         if phone_layout {
             let touched = pad.read();
             frame.merge(&touched);

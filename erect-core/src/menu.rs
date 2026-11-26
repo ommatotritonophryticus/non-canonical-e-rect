@@ -14,6 +14,18 @@ use crate::settings::VolumeChannel;
 pub enum MenuAction {
     StartRun(usize),
     OpenSettings,
+    OpenHelp,
+    OpenCredits,
+    OpenControls,
+
+    /* controls */
+    /// Which scheme the controls screen is editing.
+    AdjustControlsScheme,
+    /// One action's buttons: left and right pick a slot, confirm waits for a
+    /// button to put in it.
+    Bind(crate::binds::Action),
+    /// Puts the scheme back to the platform's own layout.
+    ResetControls,
     Back,
     AdjustScheme(usize),
     AdjustColor(usize),
@@ -87,6 +99,8 @@ impl MenuRow {
                 | MenuAction::AdjustDevAutoAttack
                 | MenuAction::AdjustCampaignWeapon
                 | MenuAction::AdjustCampaignMode
+                | MenuAction::AdjustControlsScheme
+                | MenuAction::Bind(_)
         )
     }
 }

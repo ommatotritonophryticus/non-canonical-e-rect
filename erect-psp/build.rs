@@ -8,9 +8,17 @@ use fontdue::{Font, FontSettings};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-/// Printable ASCII plus the arrows the on-screen hints use.
-const FIRST_CHAR: u8 = 32;
-const LAST_CHAR: u8 = 126;
+/// Printable ASCII, then the Russian alphabet for the how-to-play screen's
+/// second language: А to я, and Ё and ё, which sit outside that run. All of
+/// them fit the 512x256 atlas at this size, with a row and a half to spare.
+fn baked_chars() -> Vec<char> {
+    let mut chars: Vec<char> = (32u8..=126).map(char::from).collect();
+    chars.extend('\u{410}'..='\u{44F}');
+    chars.push('\u{401}');
+    chars.push('\u{451}');
+    chars.sort_unstable();
+    chars
+}
 /// Rendered size. Text is scaled on the PSP, so this only sets sharpness.
 ///
 /// Tiny5 is a pixel font on a 5-unit grid and its capitals are 9/16 of the em,
@@ -33,8 +41,8 @@ fn main() {
 
     let (mut pen_x, mut pen_y, mut row_h) = (0usize, 0usize, 0usize);
 
-    for code in FIRST_CHAR..=LAST_CHAR {
-        let ch = code as char;
+    let chars = baked_chars();
+    for &ch in &chars {
         let (metrics, bitmap) = font.rasterize(ch, GLYPH_PX);
         let (gw, gh) = (metrics.width, metrics.height);
 
@@ -83,8 +91,9 @@ fn main() {
     // scales by it and a font swap leaves the layout where it was.
     let cap_px = font.rasterize('M', GLYPH_PX).0.height as f32;
     writeln!(table, "pub const CAP_PX: f32 = {cap_px:?};").unwrap();
-    writeln!(table, "pub const FIRST_CHAR: u8 = {FIRST_CHAR};").unwrap();
-    writeln!(table, "pub const LAST_CHAR: u8 = {LAST_CHAR};").unwrap();
+    // The code point of every glyph below, in the same order and sorted, so a
+    // character is found by binary search.
+    writeln!(table, "pub static CODES: [u32; {}] = {:?};", chars.len(), chars.iter().map(|c| *c as u32).collect::<Vec<_>>()).unwrap();
     writeln!(
         table,
         "pub static GLYPHS: [Glyph; {}] = [",

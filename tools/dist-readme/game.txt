@@ -14,6 +14,9 @@ lull and a countdown before the next.
     slam      in the air: drop fast and put up the wall on landing, if you
               hold a charge - the wall hits everything it reaches
 
+HOW TO PLAY on the title screen has all of this in the game, in English or in
+Russian; CREDITS says who made it and under what licence.
+
 Hitting and killing fills the energy bar, and a full bar becomes a wall charge
 (the number at the top of the screen). Wounded players bank energy faster - up
 to three times as fast on the brink.

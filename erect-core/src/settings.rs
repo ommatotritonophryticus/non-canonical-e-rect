@@ -5,8 +5,13 @@
 //! raises [`Settings::dirty`] when a frontend should persist them.
 
 use crate::attack::AttackKind;
+use crate::binds::Bindings;
 use crate::campaign::ModeKind;
 use crate::config::{MAX_PLAYERS, PLAYER_COLORS};
+
+/// The most control schemes any platform offers. A desktop has four - two
+/// keyboard halves and two pads - and the stored settings keep a slot for each.
+pub const MAX_SCHEMES: usize = 4;
 
 /// One control scheme a platform offers. Supplied by the frontend, because the
 /// list differs per platform - a desktop has keyboard layouts and gamepads, a
@@ -17,6 +22,12 @@ pub struct SchemeInfo {
     pub is_gamepad: bool,
     /// Which physical pad a gamepad scheme reads.
     pub pad_index: usize,
+    /// The name of every button this scheme's device has that can be bound to
+    /// something, indexed by the number a binding stores. The pause button is
+    /// never in it.
+    pub buttons: &'static [&'static str],
+    /// The layout this scheme starts with, and goes back to on a reset.
+    pub defaults: Bindings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +67,10 @@ pub struct Settings {
     pub tutorial: [ModeRecord; AttackKind::EVERY.len()],
     /// How each weapon's campaign has gone, filed by [`AttackKind::index`].
     pub campaign: [ModeRecord; AttackKind::EVERY.len()],
+    /// Layouts the player changed, by scheme index. `None` is the scheme's own
+    /// default: only what was actually changed is kept, so a later build that
+    /// improves a default reaches everyone who never touched it.
+    pub bindings: [Option<Bindings>; MAX_SCHEMES],
     /// How each weapon's head start has gone. Kept apart from the campaign's:
     /// starting on wave seven with five thousand in hand makes its waves and
     /// scores a different thing to compare.
@@ -98,6 +113,7 @@ impl Default for Settings {
             campaign: [ModeRecord::default(); AttackKind::EVERY.len()],
             head_start: [ModeRecord::default(); AttackKind::EVERY.len()],
             head_start_unlocked: [false; AttackKind::EVERY.len()],
+            bindings: [None; MAX_SCHEMES],
         }
     }
 }

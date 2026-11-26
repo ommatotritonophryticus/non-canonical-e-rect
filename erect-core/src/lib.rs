@@ -21,6 +21,7 @@ extern crate alloc;
 pub mod attack;
 pub mod audio;
 pub mod backdrop;
+pub mod binds;
 pub mod boon;
 pub mod campaign;
 pub mod color;
@@ -34,6 +35,7 @@ pub mod menu;
 pub mod offer;
 pub mod recipe;
 pub mod settings;
+pub mod text;
 pub mod waves;
 
 #[cfg(test)]

@@ -23,6 +23,15 @@ page.
 - **AUTO ATTACK** boon: holding attack keeps swinging with any weapon, resting
   four frames between swings. Not offered while carrying SHOT, which already
   does this.
+- **HOW TO PLAY** and **CREDITS** on the title screen: how the game plays,
+  scrolling, in English or Russian; and who made it, with its licences and
+  version.
+- **SETTINGS > CONTROLS**: every game action - left, right, jump, attack, dash,
+  slam - can be moved to other keys or buttons, on every platform with a
+  keyboard or a pad (not the on-screen touch pad). Each action takes up to
+  three, one key may serve several actions, and each scheme can be put back as
+  it ships. Pause and the menus keep fixed keys, so a layout can always be
+  fixed from the menu.
 - **PIERCE slows the game down** while an enemy is within its reach - in a
   straight line from full speed at the tip of the reach to a quarter of the
   speed with the enemy right against you. The slow motion is smooth: frames
@@ -54,8 +63,8 @@ page.
   PSP Go's internal storage (`ef0:`) and from a renamed folder.
 - L jumps and R dashes, as well as Cross and Triangle.
 - The game is listed as "E-Rect" in the PSP's menu instead of "erect-psp".
-- Which head starts are unlocked is saved. Settings files from 0.2 are read and
-  carried over.
+- Which head starts are unlocked, and the controls, are saved. Settings files
+  from 0.2 are read and carried over.
 
 ### Browser and Android
 

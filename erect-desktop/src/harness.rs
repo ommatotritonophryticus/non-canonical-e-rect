@@ -198,6 +198,13 @@ impl Harness {
                 game.state = erect_core::game::State::Campaigns;
                 game.campaign_mode = 2;
             }
+            // The long texts, the second language and the controls screen.
+            Some("help") => game.open_text(erect_core::game::State::Help, erect_core::text::Lang::En),
+            Some("helpru") => game.open_text(erect_core::game::State::Help, erect_core::text::Lang::Ru),
+            Some("credits") => {
+                game.open_text(erect_core::game::State::Credits, erect_core::text::Lang::En)
+            }
+            Some("controls") => game.open_controls(),
             _ => match written {
                 Some((kind, weapon)) => {
                     game.start_written(kind, weapon, 1);

@@ -6,6 +6,7 @@
 //! localStorage key in a browser. Only the two functions at the very bottom of
 //! each half differ.
 
+use erect_core::binds::{Action, Bindings, NONE, SLOTS};
 use erect_core::settings::PlayerConfig;
 use erect_core::settings::Settings;
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,12 @@ struct StoredSettings {
     /// opens its head start regardless, so nothing earned is lost.
     #[serde(default)]
     head_start_unlocked: Vec<bool>,
+    /// Changed layouts, one entry per control scheme: `null` for a scheme left
+    /// as it ships, otherwise its buttons action by action, slot by slot, with
+    /// 65535 for an empty slot. Absent in a save from before buttons could be
+    /// moved, which reads as every scheme as it ships.
+    #[serde(default)]
+    bindings: Vec<Option<Vec<Vec<u16>>>>,
 }
 
 /// Missing from an older save file means the setting did not exist yet, and
@@ -114,6 +121,18 @@ fn parse(text: &str) -> Settings {
         slot.best_wave = stored.tutorial_wave.get(i).copied().unwrap_or(0);
         slot.best_score = stored.tutorial_score.get(i).copied().unwrap_or(0);
     }
+    for (i, slot) in settings.bindings.iter_mut().enumerate() {
+        *slot = stored.bindings.get(i).cloned().flatten().map(|actions| {
+            let mut binds = Bindings::default();
+            for (a, action) in Action::EVERY.into_iter().enumerate() {
+                for s in 0..SLOTS {
+                    let b = actions.get(a).and_then(|slots| slots.get(s)).copied();
+                    binds.set(action, s, b.unwrap_or(NONE));
+                }
+            }
+            binds
+        });
+    }
     for (i, open) in settings.head_start_unlocked.iter_mut().enumerate() {
         *open = stored.head_start_unlocked.get(i).copied().unwrap_or(false);
     }
@@ -153,6 +172,11 @@ fn encode(settings: &Settings) -> Option<String> {
         head_start_wave: settings.head_start.iter().map(|c| c.best_wave).collect(),
         head_start_score: settings.head_start.iter().map(|c| c.best_score).collect(),
         head_start_unlocked: settings.head_start_unlocked.to_vec(),
+        bindings: settings
+            .bindings
+            .iter()
+            .map(|b| b.map(|b| b.buttons.iter().map(|slots| slots.to_vec()).collect()))
+            .collect(),
     };
     serde_json::to_string(&stored).ok()
 }
@@ -288,6 +312,8 @@ mod tests {
             slot.best_score = i64::MAX;
         }
         settings.head_start_unlocked = [true; erect_core::attack::AttackKind::EVERY.len()];
+        // Every scheme rebound, every slot holding the widest number there is.
+        settings.bindings = [Some(Bindings::new([[NONE - 1; SLOTS]; 6])); 4];
         let text = encode(&settings).expect("settings should encode");
         assert!(text.len() < STORAGE_CAP, "the document is {} bytes", text.len());
         let back = parse(&text);
@@ -295,6 +321,7 @@ mod tests {
         assert_eq!(back.tutorial, settings.tutorial, "every table of it");
         assert_eq!(back.head_start, settings.head_start, "every table of it");
         assert_eq!(back.head_start_unlocked, settings.head_start_unlocked, "and the unlocks");
+        assert_eq!(back.bindings, settings.bindings, "and the layouts");
     }
 
     #[test]
@@ -308,6 +335,19 @@ mod tests {
         assert!(settings.tutorial.iter().all(|c| !c.cleared && c.best_wave == 0));
         assert!(settings.head_start.iter().all(|c| !c.cleared && c.best_wave == 0));
         assert!(settings.head_start_unlocked.iter().all(|open| !open));
+        assert!(settings.bindings.iter().all(|b| b.is_none()), "every scheme as it ships");
+    }
+
+    #[test]
+    fn a_changed_layout_survives_the_trip_and_an_unchanged_one_stays_unchanged() {
+        let mut settings = Settings::default();
+        let mut binds = crate::input::SCHEMES[2].defaults;
+        binds.set(Action::Jump, 2, 7);
+        binds.set(Action::Left, 0, NONE);
+        settings.bindings[2] = Some(binds);
+        let back = parse(&encode(&settings).expect("settings should encode"));
+        assert_eq!(back.bindings[2], Some(binds));
+        assert_eq!(back.bindings[0], None, "untouched schemes are not written as changed");
     }
 
     #[test]

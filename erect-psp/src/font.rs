@@ -43,11 +43,7 @@ pub fn atlas_ptr() -> *const u32 {
 }
 
 pub fn glyph(ch: char) -> Option<&'static Glyph> {
-    let code = ch as u32;
-    if code < FIRST_CHAR as u32 || code > LAST_CHAR as u32 {
-        return None;
-    }
-    GLYPHS.get((code - FIRST_CHAR as u32) as usize)
+    CODES.binary_search(&(ch as u32)).ok().and_then(|i| GLYPHS.get(i))
 }
 
 /// The fraction of the em taken up by capitals in the face the game's text

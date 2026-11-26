@@ -11,6 +11,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::attack::AttackKind;
+use crate::binds::{Action, Bindings, NONE, SLOTS};
+use crate::text::{self, Lang};
 use crate::boon::{
     Boon, WallMod, AUTO_ATTACK_GAP_TICKS, DASH_FREE_2_DISCOUNT, SHIELD_COOLDOWN_TICKS,
 };
@@ -43,6 +45,12 @@ pub enum State {
     /// "Are you sure?" over the paused game. Its own state rather than a flag,
     /// so the renderer and the input both know exactly what is on screen.
     ConfirmAbandon,
+    /// How to play, as scrolling text.
+    Help,
+    /// Who made it and its licence, as scrolling text.
+    Credits,
+    /// Which buttons play the game, per scheme. Reached from settings.
+    Controls,
     /// The run has ended and the result is on screen. Nothing simulates and no
     /// input is taken, so a death cannot be skipped past by a held button.
     GameOver,
@@ -171,6 +179,21 @@ pub struct Game {
     pub pause_menu: Menu,
     pub confirm_menu: Menu,
     pub dev_menu: Menu,
+    pub controls_menu: Menu,
+    /// The scheme the controls screen is editing.
+    pub controls_scheme: usize,
+    /// Which of an action's slots left and right have picked.
+    pub controls_slot: usize,
+    /// The action waiting for a button, while the controls screen is waiting.
+    pub capturing: Option<Action>,
+    /// The text the help or credits screen is showing, wrapped. Built on the
+    /// way in rather than every frame, which on a PSP would be a hundred
+    /// allocations a frame.
+    pub text: Vec<text::Line>,
+    /// The first line of [`Self::text`] on screen.
+    pub text_scroll: usize,
+    /// The language the help screen is in.
+    pub help_lang: Lang,
     /// What the developer menu will start a run on. Kept across visits so a
     /// wave can be tried, died on, and tried again without retyping it.
     pub dev: DevSetup,
@@ -256,6 +279,15 @@ impl Game {
         max_players: usize,
     ) -> Self {
         settings.sanitize(schemes.len());
+        // A changed layout keeps only buttons this platform has, and a scheme
+        // the platform does not offer keeps no layout at all.
+        for (i, slot) in settings.bindings.iter_mut().enumerate() {
+            match (schemes.get(i), slot.as_mut()) {
+                (Some(scheme), Some(binds)) => binds.sanitize(scheme.buttons.len()),
+                (None, Some(_)) => *slot = None,
+                _ => {}
+            }
+        }
         let max_players = max_players.clamp(1, MAX_PLAYERS);
         let mut game = Self {
             gravity: viewport.hper(1.0),
@@ -290,8 +322,20 @@ impl Game {
             // Five rows now, and the record lines sit at 76 and 82. At the
             // ordinary pitch the fifth would land on top of them; tightened and
             // started higher, all seven lines share the screen.
-            title_menu: Menu::tight(38.0, 8.0),
-            settings_menu: Menu::new(26.0),
+            // Seven rows since HOW TO PLAY and CREDITS joined them; at 5.8%
+            // from 34 the last sits at 69, clear of the record line at 76.
+            title_menu: Menu::tight(34.0, 5.8),
+            // Eight rows on a desktop with CONTROLS in them. At the ordinary
+            // 9% the last would sit under the floor band.
+            settings_menu: Menu::tight(24.0, 7.5),
+            // The scheme, six actions, reset and back.
+            controls_menu: Menu::tight(22.0, 6.5),
+            controls_scheme: 0,
+            controls_slot: 0,
+            capturing: None,
+            text: Vec::new(),
+            text_scroll: 0,
+            help_lang: Lang::En,
             // Four rows at the ordinary pitch would put the last one on top of
             // the status line, which is the one thing this screen is for.
             campaign_menu: Menu::tight(44.0, 8.0),
@@ -1466,9 +1510,13 @@ impl Game {
         // tick rather than at every transition into and out of a menu, because
         // there are six such transitions and only one of them is obvious.
         match self.state {
-            State::Title | State::Settings | State::Campaigns | State::DevMenu => {
-                self.background.set_target(BG_MENU)
-            }
+            State::Title
+            | State::Settings
+            | State::Campaigns
+            | State::DevMenu
+            | State::Help
+            | State::Credits
+            | State::Controls => self.background.set_target(BG_MENU),
             _ if matches!(
                 self.last_state,
                 State::Title | State::Settings | State::DevMenu
@@ -1492,6 +1540,16 @@ impl Game {
                 self.handle_menu_input(input);
                 // Nothing else moves here, so the drift is the whole of what
                 // makes the screen behind the menu alive.
+                self.update_camera();
+            }
+            State::Help | State::Credits => {
+                self.handle_text_input(input);
+                self.update_camera();
+            }
+            State::Controls => {
+                if !self.take_capture(input) {
+                    self.handle_menu_input(input);
+                }
                 self.update_camera();
             }
             State::Paused => {
@@ -1553,6 +1611,7 @@ impl Game {
                     self.state = State::Title;
                     self.title_menu.index = 0;
                 }
+                State::Controls => self.open_settings(),
                 // Backing out of the question is the same as answering "no".
                 State::ConfirmAbandon => {
                     self.state = State::Paused;
@@ -1592,6 +1651,51 @@ impl Game {
                 rows
             }
             // "No" sits first, so a mashed confirm button keeps the run.
+            State::Controls => {
+                let scheme = self.controls_scheme_info();
+                let mut rows = alloc::vec![MenuRow {
+                    label: format!("SCHEME: {}", scheme.label),
+                    action: MenuAction::AdjustControlsScheme,
+                    swatch: None,
+                }];
+                let binds = self.bindings(self.controls_scheme);
+                for (i, action) in Action::EVERY.into_iter().enumerate() {
+                    // The picked slot is bracketed on the row the highlight is
+                    // on, so it is plain which button a confirm would replace.
+                    let here = self.controls_menu.index == i + 1;
+                    let mut label = format!("{}: ", action.label());
+                    for slot in 0..SLOTS {
+                        if slot > 0 {
+                            label.push_str(" / ");
+                        }
+                        let name = if here && self.capturing == Some(action) && slot == self.controls_slot {
+                            "..."
+                        } else {
+                            match binds.get(action, slot) {
+                                NONE => "-",
+                                b => scheme.buttons.get(b as usize).copied().unwrap_or("?"),
+                            }
+                        };
+                        if here && slot == self.controls_slot {
+                            label.push_str(&format!("[{name}]"));
+                        } else {
+                            label.push_str(name);
+                        }
+                    }
+                    rows.push(MenuRow { label, action: MenuAction::Bind(action), swatch: None });
+                }
+                rows.push(MenuRow {
+                    label: "RESET TO DEFAULTS".to_string(),
+                    action: MenuAction::ResetControls,
+                    swatch: None,
+                });
+                rows.push(MenuRow {
+                    label: "BACK".to_string(),
+                    action: MenuAction::Back,
+                    swatch: None,
+                });
+                rows
+            }
             State::ConfirmAbandon => vec![
                 MenuRow { label: "NO".to_string(), action: MenuAction::KeepPlaying, swatch: None },
                 MenuRow { label: "YES".to_string(), action: MenuAction::AbandonRun, swatch: None },
@@ -1738,6 +1842,11 @@ impl Game {
                     swatch: None,
                 });
                 rows.push(MenuRow {
+                    label: "CONTROLS".to_string(),
+                    action: MenuAction::OpenControls,
+                    swatch: None,
+                });
+                rows.push(MenuRow {
                     label: "BACK".to_string(),
                     action: MenuAction::Back,
                     swatch: None,
@@ -1771,12 +1880,172 @@ impl Game {
                     swatch: None,
                 });
                 rows.push(MenuRow {
+                    label: "HOW TO PLAY".to_string(),
+                    action: MenuAction::OpenHelp,
+                    swatch: None,
+                });
+                rows.push(MenuRow {
+                    label: "CREDITS".to_string(),
+                    action: MenuAction::OpenCredits,
+                    swatch: None,
+                });
+                rows.push(MenuRow {
                     label: "EXIT".to_string(),
                     action: MenuAction::Quit,
                     swatch: None,
                 });
                 rows
             }
+        }
+    }
+
+    /* ---------------- controls ---------------- */
+
+    /// The layout `scheme` plays with: the player's own if they changed it,
+    /// the platform's otherwise.
+    pub fn bindings(&self, scheme: usize) -> Bindings {
+        let Some(info) = self.schemes.get(scheme) else {
+            return Bindings::default();
+        };
+        self.settings
+            .bindings
+            .get(scheme)
+            .copied()
+            .flatten()
+            .unwrap_or(info.defaults)
+    }
+
+    /// Each player's scheme and the layout it plays with, in player order -
+    /// what a frontend reads its buttons through.
+    pub fn player_controls(&self) -> Vec<(usize, Bindings)> {
+        self.player_schemes()
+            .into_iter()
+            .map(|s| (s, self.bindings(s)))
+            .collect()
+    }
+
+    /// The scheme the controls screen is editing.
+    pub fn controls_scheme_info(&self) -> &SchemeInfo {
+        &self.schemes[self.controls_scheme.min(self.schemes.len() - 1)]
+    }
+
+    /// Opens the controls screen, on the scheme the first player is using -
+    /// the one most likely to be what they came to change.
+    pub fn open_controls(&mut self) {
+        self.state = State::Controls;
+        self.controls_menu.index = 0;
+        self.controls_slot = 0;
+        self.capturing = None;
+        self.controls_scheme =
+            self.settings.players[0].scheme.min(self.schemes.len().saturating_sub(1));
+    }
+
+    fn cycle_controls_scheme(&mut self, dir: i32) {
+        let n = self.schemes.len().max(1) as i32;
+        self.controls_scheme = ((self.controls_scheme as i32 + dir).rem_euclid(n)) as usize;
+    }
+
+    /// While the controls screen waits for a button: puts the first one
+    /// pressed into the picked slot, or empties the slot on the pause button,
+    /// which can never be bound and so is free to mean "nothing". Returns
+    /// whether it was waiting, so the menu does not also act on the press.
+    fn take_capture(&mut self, input: &InputFrame) -> bool {
+        let Some(action) = self.capturing else {
+            return false;
+        };
+        let scheme = self.controls_scheme;
+        let button = if input.pause {
+            Some(NONE)
+        } else {
+            input.raw.get(scheme).copied().flatten()
+        };
+        if let Some(button) = button {
+            let mut binds = self.bindings(scheme);
+            binds.set(action, self.controls_slot, button);
+            if let Some(slot) = self.settings.bindings.get_mut(scheme) {
+                *slot = Some(binds);
+                self.settings.dirty = true;
+            }
+            self.capturing = None;
+        }
+        true
+    }
+
+    /// The line under the controls screen: what the buttons do there.
+    pub fn controls_hint(&self) -> &'static str {
+        if self.capturing.is_some() {
+            "PRESS A BUTTON - PAUSE EMPTIES THE SLOT"
+        } else {
+            "LEFT/RIGHT PICK A SLOT - CONFIRM TO CHANGE"
+        }
+    }
+
+    fn open_settings(&mut self) {
+        self.state = State::Settings;
+        self.capturing = None;
+        // Back on the CONTROLS row, which is where the player left from.
+        let rows = self.menu_rows([false; MAX_PLAYERS]);
+        self.settings_menu.index = rows
+            .iter()
+            .position(|r| r.action == MenuAction::OpenControls)
+            .unwrap_or(0);
+    }
+
+    /* ---------------- help and credits ---------------- */
+
+    /// Lines of text the help and credits screens show at once.
+    pub const TEXT_LINES: usize = 11;
+    /// Lines one press of up or down moves.
+    const TEXT_STEP: usize = 3;
+
+    /// Opens the help or the credits, from the top. `lang` is the help's
+    /// language; the credits have one.
+    pub fn open_text(&mut self, state: State, lang: Lang) {
+        self.help_lang = lang;
+        self.state = state;
+        self.text_scroll = 0;
+        self.rebuild_text();
+    }
+
+    fn rebuild_text(&mut self) {
+        self.text = match self.state {
+            State::Help => text::help(self.help_lang),
+            State::Credits => text::credits(env!("CARGO_PKG_VERSION")),
+            _ => Vec::new(),
+        };
+    }
+
+    /// The last line the text can be scrolled to start from.
+    pub fn text_scroll_max(&self) -> usize {
+        self.text.len().saturating_sub(Self::TEXT_LINES)
+    }
+
+    fn handle_text_input(&mut self, input: &InputFrame) {
+        let m = input.menu;
+        if m.up {
+            self.text_scroll = self.text_scroll.saturating_sub(Self::TEXT_STEP);
+        }
+        if m.down {
+            self.text_scroll = (self.text_scroll + Self::TEXT_STEP).min(self.text_scroll_max());
+        }
+        if (m.left || m.right) && self.state == State::Help {
+            let n = Lang::EVERY.len() as i32;
+            let at = Lang::EVERY.iter().position(|l| *l == self.help_lang).unwrap_or(0) as i32;
+            let dir = if m.left { -1 } else { 1 };
+            self.help_lang = Lang::EVERY[(at + dir).rem_euclid(n) as usize];
+            self.rebuild_text();
+            self.text_scroll = self.text_scroll.min(self.text_scroll_max());
+        }
+        if m.back || m.confirm {
+            let row = if self.state == State::Help {
+                MenuAction::OpenHelp
+            } else {
+                MenuAction::OpenCredits
+            };
+            self.state = State::Title;
+            self.text = Vec::new();
+            let rows = self.menu_rows([false; MAX_PLAYERS]);
+            self.title_menu.index = rows.iter().position(|r| r.action == row).unwrap_or(0);
         }
     }
 
@@ -1827,6 +2096,7 @@ impl Game {
     fn current_menu_mut(&mut self) -> &mut Menu {
         match self.state {
             State::Settings => &mut self.settings_menu,
+            State::Controls => &mut self.controls_menu,
             State::Campaigns => &mut self.campaign_menu,
             State::DevMenu => &mut self.dev_menu,
             State::Paused => &mut self.pause_menu,
@@ -1843,6 +2113,7 @@ impl Game {
     fn selected_action(&self) -> Option<MenuAction> {
         let menu = match self.state {
             State::Settings => &self.settings_menu,
+            State::Controls => &self.controls_menu,
             State::Campaigns => &self.campaign_menu,
             State::DevMenu => &self.dev_menu,
             State::Paused => &self.pause_menu,
@@ -1883,6 +2154,11 @@ impl Game {
                 self.campaign_mode =
                     ((self.campaign_mode as i32 + dir).rem_euclid(n)) as usize;
             }
+            Some(MenuAction::AdjustControlsScheme) => self.cycle_controls_scheme(dir),
+            Some(MenuAction::Bind(_)) => {
+                self.controls_slot =
+                    ((self.controls_slot as i32 + dir).rem_euclid(SLOTS as i32)) as usize;
+            }
             _ => {}
         }
     }
@@ -1894,6 +2170,22 @@ impl Game {
                 self.state = State::Settings;
                 self.settings_menu.index = 0;
             }
+            Some(MenuAction::OpenHelp) => self.open_text(State::Help, self.help_lang),
+            Some(MenuAction::OpenCredits) => self.open_text(State::Credits, self.help_lang),
+            Some(MenuAction::OpenControls) => self.open_controls(),
+            Some(MenuAction::AdjustControlsScheme) => self.cycle_controls_scheme(1),
+            Some(MenuAction::Bind(action)) => self.capturing = Some(action),
+            Some(MenuAction::ResetControls) => {
+                if let Some(slot) = self.settings.bindings.get_mut(self.controls_scheme) {
+                    if slot.is_some() {
+                        *slot = None;
+                        self.settings.dirty = true;
+                    }
+                }
+            }
+            // Back from the controls screen is back to settings, where it was
+            // opened from; from everywhere else it is the title.
+            Some(MenuAction::Back) if self.state == State::Controls => self.open_settings(),
             Some(MenuAction::Back) => {
                 self.state = State::Title;
                 self.title_menu.index = 0;

@@ -4,6 +4,7 @@
 //! gilrs on a desktop, sceCtrl on a PSP. The core never touches a device.
 
 use crate::config::MAX_PLAYERS;
+use crate::settings::MAX_SCHEMES;
 
 /// Held state for movement, edge-triggered for one-shot actions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -43,6 +44,11 @@ pub struct InputFrame {
     pub dev_menu: bool,
     /// Drives the "(OFF)" marker on the settings screen.
     pub pads_connected: [bool; MAX_PLAYERS],
+    /// The first bindable button newly pressed this frame on each scheme's
+    /// device, by scheme index, as that scheme numbers its buttons. What the
+    /// controls screen binds when it is waiting for a button; nothing else
+    /// reads it. The pause button is never reported here.
+    pub raw: [Option<u16>; MAX_SCHEMES],
 }
 
 impl InputFrame {
@@ -67,6 +73,11 @@ impl InputFrame {
         self.menu.back |= from.menu.back;
         self.pause |= from.pause;
         self.dev_menu |= from.dev_menu;
+        for (dst, src) in self.raw.iter_mut().zip(from.raw.iter()) {
+            if dst.is_none() {
+                *dst = *src;
+            }
+        }
     }
 
     /// The one-shot half of a frame, with the held half dropped.
@@ -97,5 +108,6 @@ impl InputFrame {
         self.menu = MenuIntent::default();
         self.pause = false;
         self.dev_menu = false;
+        self.raw = [None; MAX_SCHEMES];
     }
 }

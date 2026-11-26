@@ -30,5 +30,9 @@ Controls
 Each player picks a keyboard half or a gamepad in Settings. Menus answer to any
 keyboard and any pad.
 
+These are the layouts the game ships with. SETTINGS > CONTROLS moves any of the
+six game actions to other keys or buttons, up to three for each, and one key may
+serve several actions. Pause and the menus keep the keys above.
+
 Settings and high scores go to
 ~/Library/Application Support/erect/settings.json
