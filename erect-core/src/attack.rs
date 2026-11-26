@@ -16,6 +16,9 @@
 /// Damage one tick of an ordinary swing deals, before armour.
 pub const BASE_DAMAGE: f32 = 64.0;
 
+/// What a lunge deals per tick, as a share of [`BASE_DAMAGE`].
+pub const LUNGE_DAMAGE_SCALE: f32 = 0.75;
+
 /// Levels an upgrade can reach. Level 1 is what the first pick gives.
 pub const MAX_LEVEL: u8 = 3;
 
@@ -325,6 +328,11 @@ impl AttackKind {
             // Damage per tick, and it gets every tick of the swing because it
             // never throws the enemy clear.
             AttackKind::Piercing => BASE_DAMAGE * (0.75 + 0.25 * level),
+            // A quarter under an ordinary swing, per tick. Since it carries
+            // what it catches instead of throwing it, a caught enemy takes the
+            // whole swing; at the full rate that was twice what it used to
+            // deal, and this brings it back to one and a half.
+            AttackKind::Lunge => BASE_DAMAGE * LUNGE_DAMAGE_SCALE,
             _ => BASE_DAMAGE,
         }
     }

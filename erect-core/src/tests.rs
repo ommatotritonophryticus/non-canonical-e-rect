@@ -9953,3 +9953,21 @@ fn back_from_a_text_screen_lands_on_its_row() {
     let rows = game.menu_rows([false; MAX_PLAYERS]);
     assert_eq!(rows[game.title_menu.index].action, crate::menu::MenuAction::OpenCredits);
 }
+
+#[test]
+fn a_lunge_deals_three_quarters_of_an_ordinary_swing_per_tick() {
+    use crate::attack::{BASE_DAMAGE, LUNGE_DAMAGE_SCALE};
+    assert_eq!(LUNGE_DAMAGE_SCALE, 0.75);
+    for level in 1..=MAX_LEVEL {
+        assert_eq!(AttackKind::Lunge.damage(level), BASE_DAMAGE * 0.75);
+    }
+    // And over a whole swing on an enemy caught right against the player:
+    // 384 before the cut, so 288 after it.
+    let mut game = lunging(true);
+    zombie_in_lunge(&mut game);
+    let hp = game.zombies[0].hp;
+    while game.players[0].attacking() {
+        game.tick(&idle());
+    }
+    assert_eq!(hp - game.zombies[0].hp, 288.0);
+}

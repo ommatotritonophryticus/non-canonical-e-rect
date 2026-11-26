@@ -41,8 +41,9 @@ page.
 
 - **LUNGE carries what it hits** instead of knocking it away: the enemy is held
   just inside the tip as the lunge reaches out, keeps taking the swing, and
-  walks back in once the swing is over. An enemy caught next to you now takes
-  about twice the damage from one lunge.
+  walks back in once the swing is over. Each tick of a lunge deals a quarter
+  less than before, and an enemy caught next to you takes the whole swing: one
+  and a half times what one lunge used to deal.
 - When one swing reaches more than one box in the between-wave offer, it takes
   the nearest one in the direction you face. Facing left with a long swing used
   to take the farther one.
