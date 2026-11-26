@@ -20,7 +20,16 @@ On a PSP Go the same folders work on internal storage as well
 own EBOOT, wherever that is, so the folder can also be renamed.
 
 Homebrew needs custom firmware. On stock firmware the EBOOT will not launch.
-Runs on a PSP Go with custom firmware, and in PPSSPP 1.20.4.
+
+Tested on
+---------
+    PSP Go (N1000), firmware 6.60 with custom firmware   runs
+    PPSSPP 1.20.4                                         runs
+
+Other models - PSP-1000, 2000, 3000 and E1000 - have not been tried yet. The
+PSP-1000 has half the memory of the rest, so there it will most likely load
+fewer than all three soundtracks; the game is built to carry on with as many as
+fit.
 
 Soundtracks
 -----------

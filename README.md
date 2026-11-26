@@ -77,6 +77,10 @@ cargo psp --release
 `mipsel-sony-psp` target, and including it would break a plain `cargo build` on
 the host. It needs a nightly toolchain and `cargo-psp`.
 
+The PSP build runs on real hardware: it is tested on a PSP Go (N1000), firmware
+6.60 with custom firmware, and in PPSSPP 1.20.4. Other PSP models have not been
+tried yet.
+
 ## Sound packs
 
 `packs/` holds generated assets, committed so the game runs straight from a

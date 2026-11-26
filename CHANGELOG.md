@@ -53,10 +53,11 @@ page.
 
 ### PSP
 
-- Runs on real hardware; 0.2 started to a black screen on a PSP Go. Loading
-  the soundtracks now shows a progress counter instead of a black screen, never
-  asks for more memory than is free - running out used to hang the PSP - and
-  plays with as many soundtracks as fit, or silently and saying why.
+- Runs on real hardware: tested on a PSP Go (N1000), firmware 6.60 with custom
+  firmware, where 0.2 started to a black screen. Loading the soundtracks now
+  shows a progress counter instead of a black screen, never asks for more
+  memory than is free - running out used to hang the PSP - and plays with as
+  many soundtracks as fit, or silently and saying why.
   Floating-point traps, the data cache and the audio thread's stack, all of
   which an emulator forgives, are set up the way real hardware needs.
 - Music and settings are found beside the EBOOT, so the game also runs from a
