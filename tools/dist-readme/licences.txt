@@ -1,0 +1,8 @@
+
+Licences
+--------
+E-Rect is GPL-3.0; the full text is in LICENSE. The music and sound effects are
+original work by the project author, under that same licence.
+
+The font is Tiny5 by the Tiny5 Project Authors, under the SIL Open Font License
+1.1. Its full text is in LICENSE-Tiny5.txt, alongside this file.

@@ -1,7 +1,9 @@
 [package]
 name = "erect-psp"
 description = "PSP frontend for E-Rect: sceGu rendering, sceCtrl input, Memory Stick saves"
-version = "0.1.0"
+# Kept equal to the workspace version in the root Cargo.toml; tools/release.sh
+# checks.
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
@@ -26,6 +28,3 @@ bench = []
 [profile.release]
 opt-level = 3
 lto = true
-
-[package.metadata.psp]
-title = "E-Rect"

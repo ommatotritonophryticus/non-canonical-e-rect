@@ -1,0 +1,108 @@
+
+Playing
+-------
+Waves of rectangles come at you from both sides of a field that runs on
+forever left and right; the view follows you, and enemies come to wherever you
+are, so running does not lose them for long. Clear a wave and there is a short
+lull and a countdown before the next.
+
+    jump      off the ground
+    attack    swing whatever you are carrying; three swings in quick
+              succession make a combo, and the third reaches twice as far
+    dash      a short burst that shoves what it passes through and cannot be
+              touched while it lasts; it costs a third of your energy bar
+    slam      in the air: drop fast and put up the wall on landing, if you
+              hold a charge - the wall hits everything it reaches
+
+Hitting and killing fills the energy bar, and a full bar becomes a wall charge
+(the number at the top of the screen). Wounded players bank energy faster - up
+to three times as fast on the brink.
+
+Upgrades
+--------
+Every 4000 points the team scores, three boxes stand in the lull. Hit one to
+take it. A swing that reaches more than one takes the nearest in front of you;
+starting the next wave early turns the offer down.
+
+Weapons - one at a time, each up to level 3. The third level, MASTER, changes
+what the weapon does rather than adding more of it. A different weapon arrives
+one level below the one you carry; from wave 26, at its top level.
+
+    BASIC     what you start with; the third hit of a combo leaves a blast
+              that hurts everything around it
+    HAMMER    half the reach and a slow swing, but one heavy blow per enemy
+              that throws it twice as far
+    PIERCE    does not throw, so an enemy stays in the swing and keeps taking
+              it. While an enemy is within its reach the whole game slows
+              down - to a quarter of its speed when it is right against you
+    LUNGE     starts short and reaches out through the swing. It does not
+              throw what it catches either: it carries it out on its tip, and
+              the enemy walks back in once the swing is over
+    SINGLE    one guaranteed hit per enemy per swing
+    SWEEP     a low strip out of both sides at once; flyers and jumpers pass
+              above it
+    HEAVY     shorter, but tall enough to cover you top to bottom
+    SHOT      throws a square that stops on what it hits; hold attack to keep
+              firing
+    TRAP      places boxes that stay where they are put and hurt whatever
+              walks into them
+
+Boons - kept for the rest of the run. The ones marked 2 are a second level,
+offered only once the first is held.
+
+    DOUBLE JUMP       one jump in the air, back after the next landing
+    DOUBLE JUMP 2     it also comes back when you are hit or caught in a blast
+    FREE DASH         no cooldown on the dash; only its energy is paid
+    FREE DASH 2       and that costs a fifth of what it did
+    SHIELD            takes one hit for you, then needs a second to come back
+    SHIELD 2          the hit it takes goes off as a blast around you
+    BLACK WALL        the wall drags every enemy toward you
+    GREY WALL         the wall throws every enemy away from you
+    AUTO ATTACK       hold attack to keep swinging, with a short rest between
+                      swings (not offered while you carry SHOT, which already
+                      does)
+
+From wave 26 there is an offer after every wave, and two of its three boxes
+are terms for the coming wave instead - they say THIS WAVE, and they last for
+that wave only.
+
+Modes
+-----
+    1 PLAYER, 2 PLAYERS   the endless run; it ends when you do. Two players
+                          share every offer: what one takes, both get.
+    WEAPON RUNS           one weapon, from the start to an end:
+
+        TUTORIAL      three waves, and the weapon goes up a level every wave
+        CAMPAIGN      only that weapon and the boons are ever offered; the
+                      run is won one wave after the weapon reaches MASTER
+        HEAD START    a campaign that starts on wave 7, with 5000 points and
+                      the weapon already in hand. Locked for each weapon until
+                      you have taken that weapon in its campaign.
+
+The weapon-runs screen shows how far you have got with each weapon in each
+mode.
+
+Waves
+-----
+Every fifth wave is a boss wave. Wave 10 belongs to a single flying boss: twice
+the size of an ordinary flyer, and it blinks away every time you land a hit.
+Wave 15 can bring a boss that sheds a husk every time it is hit, and wave 20
+has a boss of its own.
+
+A wave can carry up to two modifiers, one of each kind, announced during the
+countdown:
+
+    who turns up      GROUND ONLY, FLYERS ONLY, HORDE, JUMPERS
+    how it plays      HOLD THE LINE  view is pinned, you start on full health
+                      GROUNDED       no jumping; down raises the wall, longer reach
+                      NO WALL        the slam buys invulnerability; landing heals
+                      BLIND          you cannot see them, they can barely hurt you
+                      NO FOOTING     you cannot walk; every step is a jump or a
+                                     dash
+
+No blast ever hurts you - it only throws you up. Red blinkers leave one and
+reappear at the edge of the field when touched, and once more the first time
+you hit one. Shooters show a white sight that turns red for the last 100 ms
+before they fire - that is the moment to step out of the line.
+
+Music and effect volumes are in Settings.

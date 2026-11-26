@@ -1,7 +1,15 @@
 # E-Rect
 
 A wave-survival brawler drawn entirely from rectangles. One body of game logic
-runs on a desktop and on a PlayStation Portable.
+runs on a desktop (macOS, Windows, Linux), in a browser, on Android and on a
+PlayStation Portable.
+
+Waves come at you across an endless field; between them you pick upgrades -
+nine weapons, each up to a third level that changes how it works, and a set of
+boons kept for the run. Besides the endless run there are weapon runs: a
+tutorial, a campaign and a head start for every weapon. How it all plays is in
+`tools/dist-readme/game.txt`, which ships as part of the README in every
+archive; what changed in each release is in `CHANGELOG.md`.
 
 ## Layout
 
@@ -9,8 +17,8 @@ runs on a desktop and on a PlayStation Portable.
 | --- | --- |
 | `erect-core` | Platform-free game logic: simulation, waves, menus, settings data. `no_std`. |
 | `erect-audio` | Adaptive music mixing: layer gains, fades and a software mixer. `no_std`. |
-| `erect-desktop` | Desktop frontend — macroquad rendering, keyboard and gamepads. |
-| `erect-psp` | PSP frontend — sceGu rendering, sceCtrl input, Memory Stick saves. |
+| `erect-desktop` | Desktop and browser frontend — macroquad rendering, keyboard, gamepads, and an on-screen pad for touch screens. The Android app is this browser build in a WebView. |
+| `erect-psp` | PSP frontend — sceGu rendering, sceCtrl input, settings saved beside the EBOOT. |
 
 `erect-core` knows nothing about windows, GPUs, gamepads or filesystems. A
 frontend supplies an `InputFrame` each tick, the list of control schemes the
@@ -21,19 +29,27 @@ Supporting directories:
 - `packs/` — runtime sound packs the game loads at startup, in both encodings
   (FLAC for the desktop, 8-bit PCM for the PSP).
 - `audio/` — the source packs those are built from, plus a `source.json` each.
-- `tools/build_pack.py` — turns a source pack into a runtime pack.
+- `web/` — the page and the JavaScript side of the browser build.
+- `android/` — the activity and manifest the APK wraps the browser build in.
+- `tools/` — `release.sh`, `web.sh` and `android.sh` build the artefacts,
+  `release-notes.sh` prints a release's changelog section, `build_pack.py`
+  turns a source pack into a runtime pack, and `dist-readme/` holds the READMEs
+  that ship inside the archives.
 
 ## Building
 
 Shippable archives for every platform, into `dist/`:
 
 ```
-tools/release.sh
+tools/release.sh       # macOS, Windows, Linux x86_64 and aarch64, PSP
+tools/web.sh serve     # the browser build, served to the local network
+tools/android.sh       # the APK
 ```
 
-`BUILDING.md` covers the prerequisites, the pinned toolchains and what is built
-in a container rather than on the host. The rest of this section is the short
-version, for working on the game rather than releasing it.
+`BUILDING.md` covers the prerequisites, the pinned toolchains, what is built
+in a container rather than on the host, and how a release is cut. The rest of
+this section is the short version, for working on the game rather than
+releasing it.
 
 Desktop:
 

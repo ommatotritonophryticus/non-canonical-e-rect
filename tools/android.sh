@@ -28,6 +28,15 @@ if [ ! -d "${BUILD_TOOLS:-}" ] || [ ! -f "${PLATFORM:-}/android.jar" ]; then
     exit 1
 fi
 
+# The APK's version comes from the workspace manifest, the one place every
+# platform's number is kept. Android compares versionCode to decide whether a
+# build is an update, so it is derived to grow with the version: 0.3.0 is 300,
+# 1.2.10 is 10210.
+VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$ROOT/Cargo.toml" | head -1)
+IFS=. read -r V_MAJOR V_MINOR V_PATCH <<< "$VERSION"
+VERSION_CODE=$((V_MAJOR * 10000 + V_MINOR * 100 + V_PATCH))
+echo "== E-Rect $VERSION (versionCode $VERSION_CODE)"
+
 echo "== web build"
 "$ROOT/tools/web.sh" >/dev/null
 
@@ -52,6 +61,8 @@ echo "== packaging"
     --manifest "$ROOT/android/AndroidManifest.xml" \
     --min-sdk-version 24 \
     --target-sdk-version 34 \
+    --version-code "$VERSION_CODE" \
+    --version-name "$VERSION" \
     -A "$WORK/assets" \
     -o "$WORK/unsigned.apk" \
     "$WORK/res.zip"

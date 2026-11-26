@@ -1,0 +1,4 @@
+# Read by cargo-psp when it writes PARAM.SFO - the name the PSP's own menu shows
+# for the game. Without this file it falls back to the crate name, and the XMB
+# lists "erect-psp". A [package.metadata.psp] table in Cargo.toml is not read.
+title = "E-Rect"

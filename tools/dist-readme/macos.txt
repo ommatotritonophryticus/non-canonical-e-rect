@@ -19,21 +19,16 @@ CoreAudio, gamepads through IOKit, both part of the system.
 
 Controls
 --------
-    Player 1   W A S D, SPACE to attack
-    Player 2   arrow keys, ENTER to attack
-    Gamepads   supported; pick a scheme per player in Settings
-    ESC        pause
+              player 1      player 2      gamepad
+    move      A  D          LEFT  RIGHT   d-pad or left stick
+    jump      W             UP            A (bottom button)
+    attack    SPACE         ENTER         X (left button)
+    dash      LEFT SHIFT    RIGHT SHIFT   either shoulder button
+    slam      S             DOWN          B (right button) or down
+    pause     ESC                         START
 
-    move left/right   walk          jump   leave the ground
-    down while airborne             ground slam (puts up the wall)
+Each player picks a keyboard half or a gamepad in Settings. Menus answer to any
+keyboard and any pad.
 
 Settings and high scores go to
 ~/Library/Application Support/erect/settings.json
-
-Licences
---------
-E-Rect is GPL-3.0; the full text is in LICENSE. The music and sound effects are
-original work by the project author, under that same licence.
-
-The font is Tiny5 by the Tiny5 Project Authors, under the SIL Open Font License
-1.1. Its full text is in LICENSE-Tiny5.txt, alongside this file.

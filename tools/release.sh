@@ -62,13 +62,38 @@ stage_licences() {
     cp "$ROOT/LICENSE-Tiny5.txt" "$1/LICENSE-Tiny5.txt"
 }
 
+# write_readme <platform-readme> <out>
+#
+# Every archive's README is three parts: what is particular to that platform
+# (installing, requirements, its buttons), then how the game plays and the
+# licences, which are the same everywhere. Kept as separate files so a change
+# to the game is written once rather than five times and left stale in four.
+write_readme() {
+    cat "$1" \
+        "$ROOT/tools/dist-readme/game.txt" \
+        "$ROOT/tools/dist-readme/licences.txt" > "$2"
+}
+
+# The version every archive is built from. erect-psp is outside the workspace
+# and so keeps its own copy; a release where the two disagree would ship the
+# PSP build under a number it does not carry, so it is refused instead.
+check_versions() {
+    local workspace psp
+    workspace=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$ROOT/Cargo.toml" | head -1)
+    psp=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$ROOT/erect-psp/Cargo.toml" | head -1)
+    [ -n "$workspace" ] || die "no version in Cargo.toml"
+    [ "$workspace" = "$psp" ] \
+        || die "erect-psp/Cargo.toml says $psp but the workspace says $workspace"
+    VERSION=$workspace
+}
+
 # stage_desktop <stage-dir> <built-binary> <readme> <binary-name>
 stage_desktop() {
     local stage=$1 binary=$2 readme=$3 name=$4
     rm -rf "$stage"
     mkdir -p "$stage"
     cp "$binary" "$stage/$name"
-    cp "$readme" "$stage/README.txt"
+    write_readme "$readme" "$stage/README.txt"
     stage_licences "$stage"
     # Only the desktop encoding ships: the 8-bit PSP copies would double the
     # download for files this build can never read.
@@ -199,10 +224,17 @@ build_linux() {
 build_windows() {
     local built
     if [ "${ERECT_NATIVE:-}" = 1 ]; then
-        # A Windows runner builds with MSVC, not mingw. Same binary to a player;
-        # the only reason the container uses mingw is that it is not Windows.
+        # A Windows runner builds with MSVC, not mingw; the only reason the
+        # container uses mingw is that it is not Windows. One difference has to
+        # be undone for the two to be the same binary to a player: MSVC links
+        # its C runtime as vcruntime140.dll, which a fresh Windows does not
+        # have, so it is linked in statically instead. The mingw build only
+        # ever needed DLLs that ship with Windows itself.
         say "Windows x86_64 (host)"
-        built=$(host_build x86_64-pc-windows-msvc)
+        built=$(
+            export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-feature=+crt-static"
+            host_build x86_64-pc-windows-msvc
+        )
     else
         say "Windows x86_64 (container, mingw)"
         # Built on whatever the host's native platform is: this is a
@@ -235,7 +267,7 @@ build_psp() {
     mkdir -p "$game/pack"
     cp "$ROOT/erect-psp/target/mipsel-sony-psp/release/erect-psp.EBOOT.PBP" \
         "$game/EBOOT.PBP"
-    cp "$ROOT/tools/dist-readme/psp.txt" "$game/README.txt"
+    write_readme "$ROOT/tools/dist-readme/psp.txt" "$game/README.txt"
     stage_licences "$game"
     local p
     for p in $(pack_dirs); do
@@ -250,6 +282,9 @@ build_psp() {
 
 targets=("$@")
 [ ${#targets[@]} -eq 0 ] && targets=("${ALL_TARGETS[@]}")
+
+check_versions
+say "E-Rect $VERSION"
 
 mkdir -p "$DIST"
 for t in "${targets[@]}"; do

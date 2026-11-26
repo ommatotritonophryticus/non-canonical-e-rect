@@ -1,7 +1,8 @@
 # Building E-Rect
 
-Five artefacts ship: macOS, Windows, Linux x86_64, Linux aarch64 and PSP.
-One script builds and packages any of them.
+Seven artefacts ship: macOS, Windows, Linux x86_64, Linux aarch64, PSP, an
+Android APK and the browser build as a zip. The first five come from one script
+that builds and packages any of them.
 
 ```
 tools/release.sh                 # everything
@@ -42,6 +43,11 @@ The readme and the licences sit *inside* the game folder rather than beside it,
 so an install is one drag and leaves nothing loose at the root of somebody's
 stick.
 
+Every archive's `README.txt` is put together from three files in
+`tools/dist-readme/`: the platform's own (installing, requirements, its
+buttons), then `game.txt` (how the game plays) and `licences.txt`, which are the
+same in every archive. A change to the game is written once, in `game.txt`.
+
 ## What builds where, and why
 
 | Target | Built by | Where |
@@ -52,6 +58,7 @@ stick.
 | Linux aarch64 | Debian 12 container | same |
 | Windows x86_64 | same container, mingw | same |
 | Browser (wasm) | `tools/web.sh` | `web/` |
+| Android | `tools/android.sh` | `android/` |
 
 The three cross targets go through a container on purpose. A Linux binary
 built there links against Debian 12's glibc, which is a floor you can state in
@@ -162,14 +169,41 @@ release. It runs on a tag beginning with `v`, and on a button in the Actions tab
 for a dry run that builds everything and publishes nothing.
 
 ```
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.3
+git push origin v0.3
 ```
 
 Each target is built on a runner that *is* that platform, rather than in the
 container `tools/release.sh` reaches for on a workstation - a runner is already
 a pinned image, so the reproducibility the container buys is already paid for.
-`ERECT_NATIVE=1` is what tells the script so.
+`ERECT_NATIVE=1` is what tells the script so. Two things differ from a
+workstation build because of it, and both are set in the scripts rather than
+left to the runner: the Linux runners are pinned to Ubuntu 24.04, because the
+glibc a binary is built against is the oldest it will run on and the Linux
+README states 2.39; and the Windows runner builds with MSVC rather than mingw,
+so its C runtime is linked in statically - otherwise `erect.exe` would need the
+Visual C++ runtime installed, which the mingw build never did.
+
+The release page's notes are the tag's section of `CHANGELOG.md`; a tag with no
+section gets GitHub's generated notes instead.
+
+### Cutting a release
+
+1. **Set the version** in `[workspace.package]` in the root `Cargo.toml`, and
+   the same number in `erect-psp/Cargo.toml`, which is outside the workspace and
+   keeps its own. `tools/release.sh` refuses to build if the two differ. The
+   APK reads its version from the root file, and its `versionCode` is derived
+   from it (0.3.0 is 300), so Android sees each release as an update.
+2. **Write the changelog section**, headed with the version alone (`## 0.3`),
+   and check what the release page will say:
+
+   ```
+   tools/release-notes.sh v0.3
+   ```
+
+3. **Run the tests** - `cargo test` - and, if a build was touched, the build.
+4. **Tag and push.** Tags are `v` and the version without a trailing `.0`
+   (`v0.2`, `v0.3`), matching the ones already pushed.
 
 The tests run first and everything else depends on them, so a red suite
 publishes nothing.
@@ -247,6 +281,11 @@ needs (`nightly-2026-08-02`, with `rust-src`) comes from
 `erect-psp/rust-toolchain.toml`, so there is nothing to select by hand — and no
 `rustup override` to set, which is the setup that does *not* survive a clone.
 
+What the PSP's own menu calls the game comes from `erect-psp/Psp.toml`, which
+cargo-psp reads when it writes `PARAM.SFO`. Without it the name falls back to
+the crate's, `erect-psp`; a `[package.metadata.psp]` table in `Cargo.toml` is
+not read.
+
 **Windows and Linux**
 
 Docker, with the daemon running. The image builds itself on first use and is
@@ -290,8 +329,9 @@ when you move.
 cargo test
 ```
 
-Runs on the host and covers `erect-core` and `erect-audio` — 299 tests. The
-frontends are mostly not covered; drawing is the part a test cannot see.
+Runs on the host and covers `erect-core`, `erect-audio` and the desktop
+frontend's settings file — 425 tests at 0.3. The frontends are otherwise mostly
+not covered; drawing is the part a test cannot see.
 
 `erect-psp` is excluded from the workspace, because it only builds for
 `mipsel-sony-psp` and its presence would break a plain `cargo build`.
@@ -326,10 +366,15 @@ with `ERECT_HARNESS` set, comma separated:
 | `on_elite=N:PATH` | save `N` frames after that - enemies enter from outside the view, so the frame one is announced on is the one frame it is not visible in |
 | `on_offer=[N:]PATH` | save while the between-wave offer is standing, which is the only time its three options are on screen |
 | `on_glimpse=[N:]PATH` | on a blind wave, save the frame the enemies show and a companion `.dark.png` where they do not |
-| `rule=blind` | pin the blind wave rule |
+| `rule=blind\|nofooting` | pin that wave rule |
+| `arm=LABEL` | start holding that weapon, by its label (`arm=lunge`) |
+| `level=N` | at that level |
+| `written=MODE:WEAPON` | a real weapon run instead of a dev one - `tutorial`, `campaign` or `headstart`, then the weapon's label |
+| `lull` | open in the between-wave countdown, with an offer standing |
+| `once` | press attack once on the first frame and never again |
 | `alive` | keep the players standing |
-| `boons` | hand the players every standing upgrade |
-| `screen=dev\|title` | open that menu instead of playing, to look at a layout |
+| `boons` | hand the players every boon, at both levels |
+| `screen=dev\|title\|campaigns\|campaigns2\|campaigns3` | open that menu instead of playing, to look at a layout; the three `campaigns` open the weapon-runs screen on the tutorial, the campaign and the head start |
 | `wall=pull\|push` | give them a modified wall and raise one every 90 ticks |
 | `fight` | swing and follow the nearest enemy |
 

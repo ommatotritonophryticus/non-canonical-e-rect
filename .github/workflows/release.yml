@@ -45,8 +45,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Both Linux runners are pinned to one Ubuntu release rather than
+          # "latest": the binary needs at least the glibc it was built against,
+          # and the README in the archive states that floor as 2.39. A runner
+          # that moved on would raise it without anyone noticing.
           - name: linux-x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             target: linux-x86_64
           - name: linux-aarch64
             runner: ubuntu-24.04-arm
@@ -171,6 +175,15 @@ jobs:
     needs: [desktop, psp, android, web]
     runs-on: ubuntu-latest
     steps:
+      # Only the changelog and the script that reads it, not the repository:
+      # a sparse, blobless checkout of two files, where a full one would be
+      # fifty megabytes of packs this job never looks at.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            CHANGELOG.md
+            tools/release-notes.sh
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -181,18 +194,22 @@ jobs:
         # dependency nobody in this repository reviews.
         env:
           GH_TOKEN: ${{ github.token }}
-          # Named outright, because this job never checks the repository out -
-          # it only needs the artefacts the other jobs uploaded. Left to work it
-          # out for itself, `gh` looks for a git remote in the working directory
-          # and fails with "not a git repository", which is true and unhelpful.
-          # Cloning fifty megabytes to tell it something it can be told is not a
-          # trade worth making.
+          # Named outright rather than left to `gh` to read off the checkout,
+          # which is sparse and was never meant to be the source of that.
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           files=$(find artifacts -type f | sort)
           test -n "$files" || { echo "nothing was built"; exit 1; }
           echo "$files"
+          # The tag's section of CHANGELOG.md, when it has one. Without one the
+          # release still goes out, with GitHub's own notes, rather than failing
+          # a build that is otherwise finished.
+          if tools/release-notes.sh "${GITHUB_REF_NAME}" > notes.md; then
+            notes=(--notes-file notes.md)
+          else
+            notes=(--generate-notes)
+          fi
           # Creating and updating are different commands, and which one is
           # wanted depends on something only the server knows. A re-run is the
           # normal way to recover from a job that failed for a reason nothing to
@@ -202,8 +219,11 @@ jobs:
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             echo "release ${GITHUB_REF_NAME} exists; replacing its files"
             gh release upload "${GITHUB_REF_NAME}" $files --clobber
+            if [ -f notes.md ] && [ -s notes.md ]; then
+              gh release edit "${GITHUB_REF_NAME}" --notes-file notes.md
+            fi
           else
             gh release create "${GITHUB_REF_NAME}" $files \
               --title "${GITHUB_REF_NAME}" \
-              --generate-notes
+              "${notes[@]}"
           fi

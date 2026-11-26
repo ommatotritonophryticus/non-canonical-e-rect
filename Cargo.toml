@@ -7,7 +7,10 @@ members = ["erect-core", "erect-audio", "erect-desktop"]
 exclude = ["erect-psp"]
 
 [workspace.package]
-version = "0.1.0"
+# The one version every platform reports. erect-psp is outside the workspace and
+# carries its own copy, which tools/release.sh refuses to build unless it
+# matches; the Android build reads this line for the APK's version.
+version = "0.3.0"
 edition = "2021"
 
 [profile.release]
