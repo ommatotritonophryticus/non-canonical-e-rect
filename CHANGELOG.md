@@ -2,11 +2,33 @@
 
 What changed for players, release by release. The release workflow publishes
 the section for a tag as that release's notes (`tools/release-notes.sh`), so a
-section is written before the tag is pushed and headed with the version alone,
-as `## 0.3` is for `v0.3`. Releases before 0.3 are on the repository's Releases
-page.
+section is written before the tag is pushed and headed with the version, as
+`## 0.3` is for `v0.3`. Anything after the version on that line is the release's
+name: `## 0.3 - Head Start` publishes as "E-Rect 0.3 - Head Start". Releases
+before 0.3 are on the repository's Releases page.
 
-## 0.3
+## 0.3 - Head Start
+
+A weapon run that starts in the thick of it, second levels for three boons, an
+auto-attack boon, rebindable controls on every platform with keys or buttons,
+and a how-to-play screen in English and Russian. PIERCE now slows the game down
+around it and LUNGE carries what it hits. And the PSP build runs on real
+hardware.
+
+### Downloads
+
+| File                       | For                                                   |
+| -------------------------- | ----------------------------------------------------- |
+| `erect-windows.zip`        | Windows, x86-64                                       |
+| `erect-macos.zip`          | macOS 11 or newer, Apple Silicon                      |
+| `erect-linux-x86_64.zip`   | Linux, x86-64, glibc 2.39 or newer                    |
+| `erect-linux-aarch64.zip`  | Linux, ARM64, glibc 2.39 or newer                     |
+| `erect.apk`                | Android, with the on-screen pad                       |
+| `erect-web.zip`            | The browser build, to serve from any web server       |
+| `erect-psp.zip`            | PSP with custom firmware; unpack to the Memory Stick  |
+
+The Windows, macOS, Linux and PSP archives each carry a README with how to
+start the game, the controls and where settings are saved.
 
 ### New
 

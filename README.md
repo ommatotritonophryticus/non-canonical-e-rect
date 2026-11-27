@@ -32,7 +32,7 @@ Supporting directories:
 - `web/` — the page and the JavaScript side of the browser build.
 - `android/` — the activity and manifest the APK wraps the browser build in.
 - `tools/` — `release.sh`, `web.sh` and `android.sh` build the artefacts,
-  `release-notes.sh` prints a release's changelog section, `build_pack.py`
+  `release-notes.sh` prints a release's changelog section and title, `build_pack.py`
   turns a source pack into a runtime pack, and `dist-readme/` holds the READMEs
   that ship inside the archives.
 

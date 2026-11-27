@@ -194,11 +194,13 @@ section gets GitHub's generated notes instead.
    keeps its own. `tools/release.sh` refuses to build if the two differ. The
    APK reads its version from the root file, and its `versionCode` is derived
    from it (0.3.0 is 300), so Android sees each release as an update.
-2. **Write the changelog section**, headed with the version alone (`## 0.3`),
-   and check what the release page will say:
+2. **Write the changelog section**, headed with the version and, if the
+   release has a name, the name after a dash (`## 0.3 - Head Start`). Check what
+   the release page will say - its notes, then its title:
 
    ```
    tools/release-notes.sh v0.3
+   tools/release-notes.sh --title v0.3
    ```
 
 3. **Run the tests** - `cargo test` - and, if a build was touched, the build.

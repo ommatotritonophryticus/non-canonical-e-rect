@@ -207,8 +207,11 @@ jobs:
           # a build that is otherwise finished.
           if tools/release-notes.sh "${GITHUB_REF_NAME}" > notes.md; then
             notes=(--notes-file notes.md)
+            # "E-Rect 0.3 - Head Start", from the section's heading.
+            title=$(tools/release-notes.sh --title "${GITHUB_REF_NAME}")
           else
             notes=(--generate-notes)
+            title=${GITHUB_REF_NAME}
           fi
           # Creating and updating are different commands, and which one is
           # wanted depends on something only the server knows. A re-run is the
@@ -220,10 +223,10 @@ jobs:
             echo "release ${GITHUB_REF_NAME} exists; replacing its files"
             gh release upload "${GITHUB_REF_NAME}" $files --clobber
             if [ -f notes.md ] && [ -s notes.md ]; then
-              gh release edit "${GITHUB_REF_NAME}" --notes-file notes.md
+              gh release edit "${GITHUB_REF_NAME}" --title "$title" --notes-file notes.md
             fi
           else
             gh release create "${GITHUB_REF_NAME}" $files \
-              --title "${GITHUB_REF_NAME}" \
+              --title "$title" \
               "${notes[@]}"
           fi
